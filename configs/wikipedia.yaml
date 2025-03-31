@@ -1,0 +1,19 @@
+dataset: /data/gen-limnet/wikipedia.csv
+user_id: user_id
+item_id: item_id
+timestamp: timestamp
+
+epochs: 200
+train_ratio: 0.8
+train_batch_size: 32
+test_batch_size: 64
+
+model_name: TrainableEmbeddings
+model_attributes:
+  embedding_size: 16
+loss:
+  dot_product_mse: 1
+  expressivity_loss: 0.5
+
+metrics:
+  - mean_reciprocal_rank

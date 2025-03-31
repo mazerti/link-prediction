@@ -11,6 +11,7 @@ import wandb
 
 from settings import Settings
 from trainable_embeddings import TrainableEmbeddings
+from limnet import LiMNet
 import metrics
 
 
@@ -152,6 +153,8 @@ def pick_model(model_name: str) -> torch.nn.Module:
     match model_name:
         case "TrainableEmbeddings":
             return TrainableEmbeddings
+        case "LiMNet":
+            return LiMNet
     raise ValueError("Provided model name does not match an implementation.")
 
 
@@ -182,7 +185,9 @@ def train_epoch(
     num_batches = len(data)
     train_loss = 0
     model.train()
-    for batch, X in tqdm(enumerate(data), desc="Training", leave=False):
+    for batch, X in tqdm(
+        enumerate(data), desc="Training", leave=False, total=num_batches
+    ):
         user_embeddings, item_embeddings = model(data=X)
         loss = loss_fn(user_embeddings, item_embeddings)
         loss.backward()
@@ -194,13 +199,19 @@ def train_epoch(
     run.log({"epoch": epoch, "Training loss": train_loss})
 
 
-def assemble_loss_fn(losses: dict[str:float]):
-    loss_fn = lambda user_embeddings, item_embeddings: sum(
-        [
-            pick_metric(loss)(user_embeddings, item_embeddings) * weight
-            for loss, weight in losses.items()
-        ]
-    )
+def assemble_loss_fn(losses: dict[str:float]) -> callable:
+    """Generate a loss function as a weighted sum of the listed losses."""
+
+    def loss_fn(
+        user_embeddings: torch.Tensor, item_embeddings: torch.Tensor
+    ) -> torch.Tensor:
+        """Apply all losses and sum their results with matching weights."""
+        return sum(
+            (
+                pick_metric(loss)(user_embeddings, item_embeddings) * weight
+                for loss, weight in losses.items()
+            )
+        )
 
     return loss_fn
 

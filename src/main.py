@@ -14,23 +14,18 @@ from trainable_embeddings import TrainableEmbeddings
 from limnet import LiMNet
 import metrics
 
+torch.autograd.set_detect_anomaly(True)
+
 
 def main():
     """Main function."""
-    settings, run = get_config()
-    data = get_dataset(settings)
-    model, optimizer = build_model(settings)
-    train_model(model, data, settings, optimizer, run)
-    run.finish()
-
-
-def get_config() -> tuple[Settings, wandb.sdk.wandb_run.Run]:
-    """Returns the config given as a CLI argument."""
     args = parse_args()
-    config_raw = load_config(args.config)
-    settings = Settings(config_raw, args)
-    run = set_up_wandb(settings)
-    return settings, run
+    for config in args.config:
+        settings, run = get_config(args, config_name=config)
+        data = get_dataset(settings)
+        model, optimizer = build_model(settings)
+        train_model(model, data, settings, optimizer, run)
+        run.finish()
 
 
 def parse_args() -> argparse.Namespace:
@@ -41,12 +36,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "config",
         type=str,
+        nargs="+",
         help="Path to the configuration YAML file.",
     )
     parser.add_argument(
         "--gpu", type=str, required=False, default=None, help="Specify a gpu to use."
     )
     return parser.parse_args()
+
+
+def get_config(
+    args: argparse.Namespace, config_name: str
+) -> tuple[Settings, wandb.sdk.wandb_run.Run]:
+    """Returns the config given as a CLI argument."""
+    config_raw = load_config(config_name)
+    settings = Settings(config_raw, args)
+    run = set_up_wandb(settings)
+    return settings, run
 
 
 def load_config(config_file: str) -> dict:

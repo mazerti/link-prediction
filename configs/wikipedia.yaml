@@ -3,7 +3,7 @@ user_id_column: user_id
 item_id_column: item_id
 timestamp_column: timestamp
 
-epochs: 200
+epochs: 400
 train_ratio: 0.8
 sequence_length: 128
 sequence_stride: 48

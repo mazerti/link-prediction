@@ -75,6 +75,7 @@ def prepare_dataset(
     data: pd.DataFrame, settings: Settings
 ) -> torch.utils.data.DataLoader:
     """Split the dataset, select the columns and turn the data into a torch DataLoader."""
+    data = rename_ids(data, settings)
     train_df, test_df = train_test_split(data, settings.train_ratio, settings)
     return torch.utils.data.DataLoader(
         TemporalInteractionNetworkDataset(
@@ -101,6 +102,18 @@ def prepare_dataset(
         batch_size=settings.test_batch_size,
         shuffle=False,
     )
+
+
+def rename_ids(data: pd.DataFrame, settings: Settings) -> pd.DataFrame:
+    """Rename the ids in the data so that all users and items ids are indexed from 0."""
+    data[settings.user_id_column] = rename_serie(data[settings.user_id_column])
+    data[settings.item_id_column] = rename_serie(data[settings.item_id_column])
+    return data
+
+
+def rename_serie(serie: pd.Series):
+    """Return the serie of indices from 0 corresponding to the input serie."""
+    return serie.map({item: idx for idx, item in enumerate(serie.unique())})
 
 
 def train_test_split(

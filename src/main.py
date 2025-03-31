@@ -153,7 +153,8 @@ class TemporalInteractionNetworkDataset(torch.utils.data.Dataset):
         return int((len(self.users) - self.sequence_length) / self.sequence_stride)
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
-        start, stop = self.sequence_stride * index, self.sequence_stride * (index + 1)
+        start = self.sequence_stride * index
+        stop = start + self.sequence_length
         user_ids = self.users[start:stop].to_numpy()
         item_ids = self.items[start:stop].to_numpy()
         return (
@@ -191,7 +192,8 @@ def train_model(
     train_data, test_data = dataset
     for epoch in tqdm(range(1, settings.epochs + 1), desc="epochs"):
         train_epoch(model, train_data, settings, optimizer, run, epoch)
-        evaluate(model, test_data, settings, run, epoch)
+        if epoch % settings.evaluate_every == 0:
+            evaluate(model, test_data, settings, run, epoch)
 
 
 def train_epoch(

@@ -67,51 +67,61 @@ class LiMNet(torch.nn.Module):
 
         Arguments:
         data: passing data=(users, items) is equivalent to passing users=users, items=items
-        users: (batch_size) tensor.
-        items: (batch_size) tensor.
+        users: (batch_size, sequence_size) tensor.
+        items: (batch_size, sequence_size) tensor.
         """
         if data is not None or (users is not None and items is not None):
             user_ids, item_ids = data or (users, items)
-            return self.forward_edge(user_ids, item_ids)
+            return self.forward_edge_sequence(user_ids, item_ids)
         if users is not None:
             return self.extract_user_embeddings(users)
         if items is not None:
             return self.extract_item_embeddings(items)
         raise ValueError("Invalid input, provide user, item, or both.")
 
-    def forward_edge(
+    def forward_edge_sequence(
         self,
-        users: tuple[torch.Tensor, torch.Tensor],
-        items: tuple[torch.Tensor, torch.Tensor],
+        users: torch.Tensor,
+        items: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Process an incomming edge, returning the updating memory (i.e. embedding) of the interacting nodes.
+        """Process a sequence of incomming edges, updating the memory (i.e. embedding) for the interacting nodes.
 
         Arguments:
-        users: (batch_size) tensor.
-        items: (batch_size) tensor.
+        users: (batch_size, sequence_size) tensor.
+        items: (batch_size, sequence_size) tensor.
 
         Returns:
-        user_embeddings: (batch_size, embedding_size) tensor.
-        item_embeddings: (batch_size, embedding_size) tensor.
+        user_embeddings: (batch_size, sequence_size, embedding_size) tensor.
+        item_embeddings: (batch_size, sequence_size, embedding_size) tensor.
         """
-        user_embeddings = self.extract_user_embeddings(users)
-        item_embeddings = self.extract_item_embeddings(items)
-        user_input = torch.hstack((user_embeddings, item_embeddings))
-        item_input = torch.hstack((item_embeddings, user_embeddings))
+        sequence_size = users.shape[1]
+        updated_user_embeddings = []
+        updated_item_embeddings = []
+        for i in range(sequence_size):
+            batch_users, batch_items = users[:, i], items[:, i]
+            user_embeddings = self.extract_user_embeddings(batch_users)
+            item_embeddings = self.extract_item_embeddings(batch_items)
+            user_input = torch.hstack((user_embeddings, item_embeddings))
+            item_input = torch.hstack((item_embeddings, user_embeddings))
 
-        updated_user_embeddings = self.cell(user_input)
-        updated_item_embeddings = self.cell(item_input)
+            new_user_embeddings = self.cell(user_input)
+            new_item_embeddings = self.cell(item_input)
 
-        self.user_memory[users, :] = updated_user_embeddings
-        self.item_memory[items, :] = updated_item_embeddings
-        return updated_user_embeddings, updated_item_embeddings
+            self.user_memory[batch_users, :] = new_user_embeddings
+            self.item_memory[batch_items, :] = new_item_embeddings
+
+            updated_user_embeddings.append(new_user_embeddings)
+            updated_item_embeddings.append(new_item_embeddings)
+        return torch.stack(updated_user_embeddings), torch.stack(
+            updated_item_embeddings
+        )
 
     def extract_user_embeddings(self, users: torch.Tensor) -> torch.Tensor:
         """Return the current state of the memory for the given users.
 
         Arguments:
-        users: (batch_size) tensor.
-        Returns: (batch_size, embedding_size) tensor.
+        users: (batch_size, sequence_size) tensor.
+        Returns: (batch_size, sequence_size, embedding_size) tensor.
         """
         return self.user_memory[users, :]
 
@@ -119,8 +129,8 @@ class LiMNet(torch.nn.Module):
         """Return the current state of the memory for the given items.
 
         Arguments:
-        items: (batch_size) tensor.
+        items: (batch_size, sequence_size) tensor.
 
-        Returns: (batch_size, embedding_size) tensor.
+        Returns: (batch_size, sequence_size, embedding_size) tensor.
         """
         return self.item_memory[items, :]

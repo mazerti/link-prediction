@@ -24,13 +24,16 @@ class Settings:
         self.model_attributes: dict[str:object]
         self.loss: dict[str:int]
 
-        # Optionnal attributes
-        for key, value in config.items():
-            setattr(self, key, value)
-
         # Required attributes
         self.device = "cpu" if args.gpu is None else f"cuda:{args.gpu}"
         self.dataset = config["dataset"]
+
+        # Facultative attributes
+        self.evaluate_every: int = 1
+
+        # Fill in attributes from config
+        for key, value in config.items():
+            setattr(self, key, value)
 
         # Attributes defined later
         self.nb_interactions = None

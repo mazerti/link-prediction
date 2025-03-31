@@ -82,6 +82,8 @@ def prepare_dataset(
             user_ids=settings.user_id_column,
             item_ids=settings.item_id_column,
             timestamps=settings.timestamp_column,
+            sequence_length=settings.sequence_length,
+            sequence_stride=settings.sequence_stride,
             device=settings.device,
         ),
         batch_size=settings.train_batch_size,
@@ -92,6 +94,8 @@ def prepare_dataset(
             user_ids=settings.user_id_column,
             item_ids=settings.item_id_column,
             timestamps=settings.timestamp_column,
+            sequence_length=settings.sequence_length,
+            sequence_stride=settings.sequence_stride,
             device=settings.device,
         ),
         batch_size=settings.test_batch_size,
@@ -120,23 +124,28 @@ class TemporalInteractionNetworkDataset(torch.utils.data.Dataset):
         user_ids: str,
         item_ids: str,
         timestamps: str,
+        sequence_length: int,
+        sequence_stride: int,
         device: torch.DeviceObjType,
     ):
         super().__init__()
         self.users = df[user_ids]
         self.items = df[item_ids]
         self.timestamps = df[timestamps]
+        self.sequence_length = sequence_length
+        self.sequence_stride = sequence_stride
         self.device = device
 
     def __len__(self) -> int:
-        return len(self.users)
+        return int((len(self.users) - self.sequence_length) / self.sequence_stride)
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
-        user_id = self.users[index]
-        item_id = self.items[index]
+        start, stop = self.sequence_stride * index, self.sequence_stride * (index + 1)
+        user_ids = self.users[start:stop].to_numpy()
+        item_ids = self.items[start:stop].to_numpy()
         return (
-            torch.tensor(user_id, device=self.device),
-            torch.tensor(item_id, device=self.device),
+            torch.tensor(user_ids, device=self.device),
+            torch.tensor(item_ids, device=self.device),
         )
 
 

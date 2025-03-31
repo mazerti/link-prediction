@@ -37,15 +37,21 @@ class TrainableEmbeddings(torch.nn.Module):
         users: None | tuple[torch.Tensor, torch.Tensor] = None,
         items: None | tuple[torch.Tensor, torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
-        """Forward pass"""
+        """Forward pass
+
+        Arguments:
+        data: passing data=(users, items) is equivalent to passing users=users, items=items
+        users: (batch_size, sequence_size) tensor.
+        items: (batch_size, sequence_size) tensor.
+        """
         if data is not None or (users is not None and items is not None):
             user_ids, item_ids = data or (users, items)
             return (
-                torch.nn.functional.normalize(self.user_embeddings(user_ids), dim=1),
-                torch.nn.functional.normalize(self.item_embeddings(item_ids), dim=1),
+                torch.nn.functional.normalize(self.user_embeddings(user_ids), dim=-1),
+                torch.nn.functional.normalize(self.item_embeddings(item_ids), dim=-1),
             )
         if users is not None:
-            return torch.nn.functional.normalize(self.user_embeddings(users), dim=1)
+            return torch.nn.functional.normalize(self.user_embeddings(users), dim=-1)
         if items is not None:
-            return torch.nn.functional.normalize(self.item_embeddings(items), dim=1)
+            return torch.nn.functional.normalize(self.item_embeddings(items), dim=-1)
         raise ValueError("Invalid input, provide user, item, or both.")

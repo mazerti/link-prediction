@@ -7,32 +7,32 @@ import pandas as pd
 class Settings:
     """Contains all the usefull informations that can change between runs."""
 
-    def _set_base_settings(self) -> None:
-        self.user_id_column = "user_id"
-        self.item_id_column = "item_id"
-        self.timestamp_column = "timestamp"
-
-        self.epochs = 10
-        self.train_ratio = 0.8
-        self.train_batch_size = 64
-        self.test_batch_size = 64
-
-        self.model_name = "TrainableEmbeddings"
-        self.model_attributes = {"embedding_size": 16}
-        self.loss = "MSE"
-
     def __init__(self, config: dict, args: argparse.Namespace):
-        self._set_base_settings()
+        # Attributes list
+        self.user_id_column: str
+        self.item_id_column: str
+        self.timestamp_column: str
 
-        # optionnal arguments
+        self.epochs: int
+        self.train_ratio: int
+        self.sequence_length: int
+        self.sequence_stride: int
+        self.train_batch_size: int
+        self.test_batch_size: int
+
+        self.model_name: str
+        self.model_attributes: dict[str:object]
+        self.loss: dict[str:int]
+
+        # Optionnal attributes
         for key, value in config.items():
             setattr(self, key, value)
 
-        # Required arguments
+        # Required attributes
         self.device = "cpu" if args.gpu is None else f"cuda:{args.gpu}"
         self.dataset = config["dataset"]
 
-        # Arguments defined later
+        # Attributes defined later
         self.nb_interactions = None
         self.nb_users = None
         self.nb_items = None

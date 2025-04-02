@@ -23,6 +23,7 @@ class Settings:
         self.model_name: str
         self.model_attributes: dict[str:object]
         self.loss: dict[str:int]
+        self.metrics: list[str]
 
         # Required attributes
         self.device = "cpu" if args.gpu is None else f"cuda:{args.gpu}"
@@ -30,6 +31,7 @@ class Settings:
 
         # Facultative attributes
         self.evaluate_every: int = 1
+        self.heat_up_length: int = 1
 
         # Fill in attributes from config
         for key, value in config.items():

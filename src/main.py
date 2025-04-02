@@ -258,7 +258,13 @@ def evaluate(
     run: wandb.sdk.wandb_run.Run,
     epoch: int,
 ):
-    """Perform an evaluation of the model."""
+    """Perform an evaluation of the model.
+
+    Arguments:
+    data: a contains batches of (users, items) tuples where
+        users: (batch_size, sequence_length)
+        items: (batch_size, sequence_length)
+    """
     model.eval()
     num_batches = len(data)
     loss_fn = assemble_loss_fn(settings.loss)
@@ -266,21 +272,86 @@ def evaluate(
     measures = {}
     with torch.no_grad():
         for X in tqdm(data, desc="validation", leave=False):
-            user_id, item_id = X
-            user_embedding = model(users=user_id)
-            item_embeddings = model(
-                items=torch.arange(settings.nb_items, device=settings.device)
+            user_sequences, item_sequences = X
+            batch_size = user_sequences.shape[0]
+            heat_up_model(
+                model, user_sequences, item_sequences, length=settings.heat_up_length
             )
-            expected_item_embedding = item_embeddings[item_id]
-            test_loss += loss_fn(user_embedding, expected_item_embedding)
-            for metric in settings.metrics:
-                measures[metric] = measures.get(metric, 0) + pick_metric(metric)(
-                    user_embedding, item_embeddings, item_id
+            for i in range(settings.heat_up_length, settings.sequence_length):
+                user_id, item_id = user_sequences[:, i], item_sequences[:, i]
+                user_embedding = model(users=user_id.unsqueeze(1)).squeeze()
+                item_embeddings = model(
+                    items=torch.arange(
+                        settings.nb_items, device=settings.device
+                    ).repeat(batch_size, 1)
                 )
-    test_loss /= num_batches
+
+                assert (
+                    item_id.shape == user_id.shape
+                ), f"{item_id.shape=}, {user_id.shape=}"
+                assert (
+                    item_embeddings.shape[0] == item_id.shape[0]
+                    and item_embeddings.shape[1] == settings.nb_items
+                ), f"{item_embeddings.shape=}, {torch.arange(settings.nb_items).repeat(batch_size, 0).shape}"
+
+                expected_item_embeddings = item_embeddings[
+                    torch.arange(batch_size), item_id
+                ]
+                assert list(expected_item_embeddings.shape) == [batch_size, model.embedding_size]
+                test_loss += loss_fn(user_embedding, expected_item_embeddings)
+                compute_metrics(
+                    settings.metrics, measures, item_id, user_embedding, item_embeddings
+                )
+                # Communicate the interaction to the model for memory updates.
+                model(users=user_id, items=item_id)
+    test_loss /= num_batches * (settings.sequence_length - settings.heat_up_length)
     for measure in measures.keys():
-        measures[measure] /= num_batches
+        measures[measure] /= num_batches * (
+            settings.sequence_length - settings.heat_up_length
+        )
     run.log({"epoch": epoch, "Testing loss": test_loss} | measures)
+
+
+def heat_up_model(
+    model: torch.nn.Module, users: torch.Tensor, items: torch.Tensor, length: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Run the model on the start of the sequence without evaluating.
+
+    Arguments:
+    users: (batch_size, sequence_length) tensor.
+    items: (batch_size, sequence_length) tensor.
+    length: must be less than sequence_length.
+    """
+    return model(
+        data=(
+            users[:, torch.arange(length, device=users.device)],
+            items[:, torch.arange(length, device=users.device)],
+        )
+    )
+
+
+def compute_metrics(
+    metrics: list[str],
+    measures: dict[str:float],
+    item_id: torch.Tensor,
+    user_embedding: torch.Tensor,
+    item_embeddings: torch.Tensor,
+):
+    """
+    Evaluates the metrics on the given embeddings and adds them to the past measures.
+
+    Arguments:
+    metrics: the name of the metrics function as defined in the metric module.
+    measures: the sums of the evaluations of the metrics over past data.
+    item_id: (batch_size) tensor. Contains the id of the expected items.
+    user_embeddings: (batch_size, embedding size) tensor.
+    item_embeddings: (nb_items, embedding size) tensor. Contains the embeddings for every single item.
+    """
+    for metric in metrics:
+        measures[metric] = measures.get(metric, 0) + pick_metric(metric)(
+            user_embedding, item_embeddings, item_id
+        )
 
 
 def score_all(

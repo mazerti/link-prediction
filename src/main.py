@@ -214,12 +214,21 @@ def train_epoch(
     loss_fn = assemble_loss_fn(settings.loss)
     num_batches = len(data)
     train_loss = 0
-    model.train()
-    for batch, X in tqdm(
-        enumerate(data), desc="Training", leave=False, total=num_batches
+    for user_sequences, item_sequences in tqdm(
+        data, desc="Training", leave=False, total=num_batches
     ):
-        user_embeddings, item_embeddings = model(data=X)
-        loss = loss_fn(user_embeddings, item_embeddings)
+        batch_size, sequence_size = user_sequences.shape
+        model.initialize_batch_run(batch_size=batch_size)
+        loss = 0
+        heat_up_model(
+            model, user_sequences, item_sequences, length=settings.heat_up_length
+        )
+        model.train()
+        for i in range(settings.heat_up_length, sequence_size):
+            users, items = user_sequences[:, i], item_sequences[:, i]
+            user_embeddings, item_embeddings = model(users=users, items=items)
+            loss += loss_fn(user_embeddings, item_embeddings)
+        loss = loss / sequence_size
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -274,6 +283,7 @@ def evaluate(
         for X in tqdm(data, desc="validation", leave=False):
             user_sequences, item_sequences = X
             batch_size = user_sequences.shape[0]
+            model.initialize_batch_run(batch_size=batch_size)
             heat_up_model(
                 model, user_sequences, item_sequences, length=settings.heat_up_length
             )
@@ -286,18 +296,9 @@ def evaluate(
                     ).repeat(batch_size, 1)
                 )
 
-                assert (
-                    item_id.shape == user_id.shape
-                ), f"{item_id.shape=}, {user_id.shape=}"
-                assert (
-                    item_embeddings.shape[0] == item_id.shape[0]
-                    and item_embeddings.shape[1] == settings.nb_items
-                ), f"{item_embeddings.shape=}, {torch.arange(settings.nb_items).repeat(batch_size, 0).shape}"
-
                 expected_item_embeddings = item_embeddings[
                     torch.arange(batch_size), item_id
                 ]
-                assert list(expected_item_embeddings.shape) == [batch_size, model.embedding_size]
                 test_loss += loss_fn(user_embedding, expected_item_embeddings)
                 compute_metrics(
                     settings.metrics, measures, item_id, user_embedding, item_embeddings
@@ -314,7 +315,7 @@ def evaluate(
 
 def heat_up_model(
     model: torch.nn.Module, users: torch.Tensor, items: torch.Tensor, length: int
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> None:
     """
     Run the model on the start of the sequence without evaluating.
 
@@ -323,16 +324,13 @@ def heat_up_model(
     items: (batch_size, sequence_length) tensor.
     length: must be less than sequence_length.
     """
-    return model(
-        data=(
-            users[:, torch.arange(length, device=users.device)],
-            items[:, torch.arange(length, device=users.device)],
-        )
-    )
+    model.eval()
+    for i in range(length):
+        model(users=users[:, i], items=items[:, i])
 
 
 def compute_metrics(
-    metrics: list[str],
+    metrics_list: list[str],
     measures: dict[str:float],
     item_id: torch.Tensor,
     user_embedding: torch.Tensor,
@@ -348,7 +346,7 @@ def compute_metrics(
     user_embeddings: (batch_size, embedding size) tensor.
     item_embeddings: (nb_items, embedding size) tensor. Contains the embeddings for every single item.
     """
-    for metric in metrics:
+    for metric in metrics_list:
         measures[metric] = measures.get(metric, 0) + pick_metric(metric)(
             user_embedding, item_embeddings, item_id
         )

@@ -22,13 +22,22 @@ class TrainableEmbeddings(torch.nn.Module):
     def build(self, settings: Settings) -> None:
         """Builds the model."""
         self.complete_arguments(settings)
-        self.user_embeddings = torch.nn.Embedding(self.nb_users, self.embedding_size, device=settings.device)
-        self.item_embeddings = torch.nn.Embedding(self.nb_items, self.embedding_size, device=settings.device)
+        self.user_embeddings = torch.nn.Embedding(
+            self.nb_users, self.embedding_size, device=settings.device
+        )
+        self.item_embeddings = torch.nn.Embedding(
+            self.nb_items, self.embedding_size, device=settings.device
+        )
 
     def complete_arguments(self, settings: Settings):
         """Complete the known arguments with up to date settings."""
         self.nb_users = settings.nb_users
         self.nb_items = settings.nb_items
+
+    def initialize_batch_run(self, batch_size: int) -> None:
+        """Prepare the model before processing a batch.
+
+        There is nothing to do for that model."""
 
     # pylint: disable=locally-disabled, invalid-name, not-callable
     def forward(
@@ -41,8 +50,8 @@ class TrainableEmbeddings(torch.nn.Module):
 
         Arguments:
         data: passing data=(users, items) is equivalent to passing users=users, items=items
-        users: (batch_size, sequence_size) tensor.
-        items: (batch_size, sequence_size) tensor.
+        users: (batch_size) tensor.
+        items: (batch_size) tensor.
         """
         if data is not None or (users is not None and items is not None):
             user_ids, item_ids = data or (users, items)

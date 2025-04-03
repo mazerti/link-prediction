@@ -5,10 +5,10 @@ timestamp_column: timestamp
 
 epochs: 200
 train_ratio: 0.8
-sequence_length: 32
-sequence_stride: 5 
+sequence_length: 1
+sequence_stride: 32
 train_batch_size: 32
-test_batch_size: 16
+test_batch_size: 32
 
 model_name: TrainableEmbeddings
 model_attributes:
@@ -20,5 +20,3 @@ loss:
 
 metrics:
   - mean_reciprocal_rank
-
-evaluate_every: 10

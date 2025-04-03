@@ -28,7 +28,7 @@ def main():
             train_model(model, data, settings, optimizer, run)
         except Exception:
             print(traceback.format_exc())
-            
+
         run.finish()
 
 
@@ -224,11 +224,14 @@ def train_epoch(
         batch_size, sequence_size = user_sequences.shape
         model.initialize_batch_run(batch_size=batch_size)
         loss = 0
-        heat_up_model(
-            model, user_sequences, item_sequences, length=settings.heat_up_length
-        )
+        if settings.training_heat_up:
+            heat_up_model(
+                model, user_sequences, item_sequences, length=settings.heat_up_length
+            )
         model.train()
-        for i in range(settings.heat_up_length, sequence_size):
+        for i in range(
+            settings.heat_up_length if settings.training_heat_up else 0, sequence_size
+        ):
             users, items = user_sequences[:, i], item_sequences[:, i]
             user_embeddings, item_embeddings = model(users=users, items=items)
             loss += loss_fn(user_embeddings, item_embeddings)
@@ -290,22 +293,14 @@ def evaluate(
             )
             for i in range(settings.heat_up_length, settings.sequence_length):
                 user_id, item_id = user_sequences[:, i], item_sequences[:, i]
-                user_embedding = model(users=user_id.unsqueeze(1)).squeeze()
-                item_embeddings = model(
-                    items=torch.arange(
-                        settings.nb_items, device=settings.device
-                    ).repeat(batch_size, 1)
+                test_loss += evaluate_step(
+                    model,
+                    settings,
+                    loss_fn,
+                    measures,
+                    user_id,
+                    item_id,
                 )
-
-                expected_item_embeddings = item_embeddings[
-                    torch.arange(batch_size), item_id
-                ]
-                test_loss += loss_fn(user_embedding, expected_item_embeddings)
-                compute_metrics(
-                    settings.metrics, measures, item_id, user_embedding, item_embeddings
-                )
-                # Communicate the interaction to the model for memory updates.
-                model(users=user_id, items=item_id)
     test_loss /= num_batches * (settings.sequence_length - settings.heat_up_length)
     for measure in measures.keys():
         measures[measure] /= num_batches * (
@@ -328,6 +323,41 @@ def heat_up_model(
     model.eval()
     for i in range(length):
         model(users=users[:, i], items=items[:, i])
+
+
+def evaluate_step(
+    model: torch.nn.Module,
+    settings: Settings,
+    loss_fn: callable,
+    measures: dict[str, float],
+    user_id: torch.Tensor,
+    item_id: torch.Tensor,
+):
+    """Run evaluation of one step in a sequence.
+    
+    Arguments:
+    loss_fn: receive (user_embeddings, item_embeddings) as input and return a float.
+        user_embeddings: (batch_size, embedding_size) tensor
+        item_embeddings: (batch_size, embedding_size) tensor
+    measures: Dict where values are the sum of the metrics over all steps.
+    user_id: (batch_size) tensor.
+    item_id: (batch_size) tensor.
+    """
+    batch_size = user_id.shape[0]
+    user_embedding = model(users=user_id.unsqueeze(1)).squeeze()
+    item_embeddings = model(
+        items=torch.arange(settings.nb_items, device=settings.device).repeat(
+            batch_size, 1
+        )
+    )
+    expected_item_embeddings = item_embeddings[torch.arange(batch_size), item_id]
+    test_loss = loss_fn(user_embedding, expected_item_embeddings)
+    compute_metrics(
+        settings.metrics, measures, item_id, user_embedding, item_embeddings
+    )
+    # Communicate the interaction to the model for memory updates.
+    model(users=user_id, items=item_id)
+    return test_loss
 
 
 def compute_metrics(

@@ -32,6 +32,7 @@ class Settings:
         # Facultative attributes
         self.evaluate_every: int = 1
         self.heat_up_length: int = 0
+        self.training_heat_up: bool = False
 
         # Fill in attributes from config
         for key, value in config.items():

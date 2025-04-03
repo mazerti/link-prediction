@@ -178,7 +178,9 @@ def build_model(settings: Settings) -> tuple[torch.nn.Module, torch.optim.Optimi
     model = pick_model(settings.model_name)(**settings.model_attributes)
     model.build(settings)
     learning_rate = 0.001 * settings.train_batch_size / 64
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(
+        model.parameters(), lr=learning_rate, weight_decay=settings.l2
+    )
     return model, optimizer
 
 
@@ -335,7 +337,7 @@ def evaluate_step(
     item_id: torch.Tensor,
 ):
     """Run evaluation of one step in a sequence.
-    
+
     Arguments:
     loss_fn: receive (user_embeddings, item_embeddings) as input and return a float.
         user_embeddings: (batch_size, embedding_size) tensor

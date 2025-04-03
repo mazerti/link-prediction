@@ -177,7 +177,8 @@ def build_model(settings: Settings) -> tuple[torch.nn.Module, torch.optim.Optimi
     """Creates the model."""
     model = pick_model(settings.model_name)(**settings.model_attributes)
     model.build(settings)
-    optimizer = torch.optim.Adam(model.parameters())
+    learning_rate = 0.001 * settings.train_batch_size / 64
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     return model, optimizer
 
 

@@ -5,7 +5,7 @@ import yaml
 import argparse
 import pandas as pd
 import torch
-import torch.utils.data.dataloader
+import traceback
 from tqdm import tqdm
 import wandb
 
@@ -21,10 +21,14 @@ def main():
     """Main function."""
     args = parse_args()
     for config in args.config:
-        settings, run = get_config(args, config_name=config)
-        data = get_dataset(settings)
-        model, optimizer = build_model(settings)
-        train_model(model, data, settings, optimizer, run)
+        try:
+            settings, run = get_config(args, config_name=config)
+            data = get_dataset(settings)
+            model, optimizer = build_model(settings)
+            train_model(model, data, settings, optimizer, run)
+        except Exception:
+            print(traceback.format_exc())
+            
         run.finish()
 
 
@@ -200,7 +204,7 @@ def train_model(
         training_loss = train_epoch(model, train_data, settings, optimizer)
         results = {"epoch": epoch, "Training loss": training_loss}
         if epoch % settings.evaluate_every == 0:
-            results = results | evaluate(model, test_data, settings, run, epoch)
+            results = results | evaluate(model, test_data, settings)
         run.log(results)
 
 

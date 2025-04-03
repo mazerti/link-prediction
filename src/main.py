@@ -197,9 +197,11 @@ def train_model(
     """Process to the model training on given dataset."""
     train_data, test_data = dataset
     for epoch in tqdm(range(1, settings.epochs + 1), desc="epochs"):
-        train_epoch(model, train_data, settings, optimizer, run, epoch)
+        training_loss = train_epoch(model, train_data, settings, optimizer)
+        results = {"epoch": epoch, "Training loss": training_loss}
         if epoch % settings.evaluate_every == 0:
-            evaluate(model, test_data, settings, run, epoch)
+            results = results | evaluate(model, test_data, settings, run, epoch)
+        run.log(results)
 
 
 def train_epoch(
@@ -207,8 +209,6 @@ def train_epoch(
     data: torch.utils.data.DataLoader,
     settings: Settings,
     optimizer: torch.optim.Optimizer,
-    run: wandb.sdk.wandb_run.Run,
-    epoch: int,
 ):
     """Train one epoch."""
     loss_fn = assemble_loss_fn(settings.loss)
@@ -234,8 +234,7 @@ def train_epoch(
         optimizer.zero_grad()
 
         train_loss += loss.item()
-    train_loss /= num_batches
-    run.log({"epoch": epoch, "Training loss": train_loss})
+    return train_loss / num_batches
 
 
 def assemble_loss_fn(losses: dict[str:float]) -> callable:
@@ -264,8 +263,6 @@ def evaluate(
     model: torch.nn.Module,
     data: torch.utils.data.DataLoader,
     settings: Settings,
-    run: wandb.sdk.wandb_run.Run,
-    epoch: int,
 ):
     """Perform an evaluation of the model.
 
@@ -310,7 +307,7 @@ def evaluate(
         measures[measure] /= num_batches * (
             settings.sequence_length - settings.heat_up_length
         )
-    run.log({"epoch": epoch, "Testing loss": test_loss} | measures)
+    return {"Testing loss": test_loss} | measures
 
 
 def heat_up_model(

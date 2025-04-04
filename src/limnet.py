@@ -135,8 +135,8 @@ class LiMNet(torch.nn.Module):
             (item_embeddings, item_features, user_embeddings, user_features)
         ).to(torch.float32)
 
-        new_user_embeddings = self.user_cell(user_input)
-        new_item_embeddings = self.item_cell(item_input)
+        new_user_embeddings = torch.nn.functional.normalize(self.user_cell(user_input), dim=1)
+        new_item_embeddings = torch.nn.functional.normalize(self.item_cell(item_input), dim=1)
 
         self.user_memory[torch.arange(batch_size), user_ids, :] = new_user_embeddings
         self.item_memory[torch.arange(batch_size), item_ids, :] = new_item_embeddings

@@ -27,4 +27,6 @@ loss:
 metrics:
   - mean_reciprocal_rank
 
-l2: 0.001
+l2: 0
+
+what: normalize_embeddings

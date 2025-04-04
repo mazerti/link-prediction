@@ -1,0 +1,26 @@
+dataset: /data/gen-limnet/lastfm.csv
+user_id_column: user_id
+item_id_column: item_id
+timestamp_column: timestamp
+
+epochs: 300
+train_ratio: 0.8
+sequence_length: 256
+heat_up_length: 192
+sequence_stride: 46
+train_batch_size: 1024
+test_batch_size: 2048
+training_heat_up: False
+
+model_name: LiMNet
+model_attributes:
+  embedding_size: 16
+  initialization: xavier_normal_
+loss:
+  dot_product_mse: 1
+  expressivity_loss: 1
+
+metrics:
+  - mean_reciprocal_rank
+
+l2: 0.0001

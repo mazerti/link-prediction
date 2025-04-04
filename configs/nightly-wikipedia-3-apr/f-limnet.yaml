@@ -3,13 +3,14 @@ user_id_column: user_id
 item_id_column: item_id
 timestamp_column: timestamp
 
-epochs: 200
+epochs: 300
 train_ratio: 0.8
 sequence_length: 256
 heat_up_length: 192
-sequence_stride: 64
-train_batch_size: 2048
+sequence_stride: 46
+train_batch_size: 1024
 test_batch_size: 2048
+training_heat_up: False
 
 model_name: LiMNet
 model_attributes:
@@ -21,3 +22,5 @@ loss:
 
 metrics:
   - mean_reciprocal_rank
+
+l2: 0.0001

@@ -1,13 +1,18 @@
 """Entry point of the framework."""
 
+# standard imports
+import argparse
+import traceback
+
+# third-party imports
 import yaml
 
-import argparse
+# first-party imports
 import pandas as pd
 import torch
-import traceback
 from tqdm import tqdm
 import wandb
+
 
 from settings import Settings
 from trainable_embeddings import TrainableEmbeddings
@@ -26,6 +31,7 @@ def main():
             data = get_dataset(settings)
             model, optimizer = build_model(settings)
             train_model(model, data, settings, optimizer, run)
+        # pylint: disable=locally-disabled, broad-exception-caught
         except Exception:
             print(traceback.format_exc())
 
@@ -85,13 +91,16 @@ def prepare_dataset(
     data: pd.DataFrame, settings: Settings
 ) -> torch.utils.data.DataLoader:
     """Split the dataset, select the columns and turn the data into a torch DataLoader."""
-    data = rename_ids(data, settings)
+    data = reindex_ids(data, settings)
+    data = compute_features(data, settings)
     train_df, test_df = train_test_split(data, settings.train_ratio, settings)
     return torch.utils.data.DataLoader(
         TemporalInteractionNetworkDataset(
             df=train_df,
             user_ids=settings.user_id_column,
+            user_features=settings.user_features,
             item_ids=settings.item_id_column,
+            item_features=settings.item_features,
             timestamps=settings.timestamp_column,
             sequence_length=settings.sequence_length,
             sequence_stride=settings.sequence_stride,
@@ -103,7 +112,9 @@ def prepare_dataset(
         TemporalInteractionNetworkDataset(
             df=test_df,
             user_ids=settings.user_id_column,
+            user_features=settings.user_features,
             item_ids=settings.item_id_column,
+            item_features=settings.item_features,
             timestamps=settings.timestamp_column,
             sequence_length=settings.sequence_length,
             sequence_stride=settings.sequence_stride,
@@ -114,16 +125,56 @@ def prepare_dataset(
     )
 
 
-def rename_ids(data: pd.DataFrame, settings: Settings) -> pd.DataFrame:
+def reindex_ids(data: pd.DataFrame, settings: Settings) -> pd.DataFrame:
     """Rename the ids in the data so that all users and items ids are indexed from 0."""
-    data[settings.user_id_column] = rename_serie(data[settings.user_id_column])
-    data[settings.item_id_column] = rename_serie(data[settings.item_id_column])
+    data[settings.user_id_column] = reindex_serie(data[settings.user_id_column])
+    data[settings.item_id_column] = reindex_serie(data[settings.item_id_column])
     return data
 
 
-def rename_serie(serie: pd.Series):
+def reindex_serie(serie: pd.Series):
     """Return the serie of indices from 0 corresponding to the input serie."""
     return serie.map({item: idx for idx, item in enumerate(serie.unique())})
+
+
+def compute_features(data: pd.DataFrame, settings: Settings) -> pd.DataFrame:
+    """Compute the features to input to the models."""
+    for feature in set(settings.user_features) | set(settings.item_features):
+        match feature:
+            case "delta_users":
+                data = compute_deltas(
+                    data,
+                    id_column=settings.user_id_column,
+                    timestamp_column=settings.timestamp_column,
+                    column_name="delta_users",
+                )
+            case "delta_items":
+                data = compute_deltas(
+                    data,
+                    id_column=settings.item_id_column,
+                    timestamp_column=settings.timestamp_column,
+                    column_name="delta_items",
+                )
+            case _:
+                raise NotImplementedError("Requested features are not implemented yet.")
+    return data
+
+
+def compute_deltas(
+    data: pd.DataFrame, id_column: str, timestamp_column: str, column_name: str
+) -> pd.DataFrame:
+    """Compute for each interaction the time since the last time the user/item interacted.
+
+    Arguments:
+    id_column: name of the column containing the user/item ids, depending on which one to compute.
+    timestamp_column: name of the column containing interaction timestamps.
+    column_name: name of the column containing the computed deltas.
+    """
+    data = data.sort_values(by=[id_column, timestamp_column])
+    data[column_name] = (
+        data[timestamp_column].diff().apply(lambda x: 0 if pd.isna(x) or x < 0 else x)
+    )
+    return data.sort_index()
 
 
 def train_test_split(
@@ -138,14 +189,21 @@ def train_test_split(
 class TemporalInteractionNetworkDataset(torch.utils.data.Dataset):
     """
     Torch Dataset for temporal interaction network.
-    Each row contain a user_id, item_id, timestamp triplet and eventually features.
+
+    Each row contain a (users, items), pair.
+        users: (batch_size, sequence_length, 1 + nb_user_features).
+        items: (batch_size, sequence_length, 1 + nb_item_features).
+    Where users[:,:,0] and items[:,:,0] are the users/items ids
+    and users[:,:,1:] and items[:,:,1:] are the users/items features (there can be none).
     """
 
     def __init__(
         self,
         df: pd.DataFrame,
         user_ids: str,
+        user_features: list[str],
         item_ids: str,
+        item_features: list[str],
         timestamps: str,
         sequence_length: int,
         sequence_stride: int,
@@ -153,7 +211,9 @@ class TemporalInteractionNetworkDataset(torch.utils.data.Dataset):
     ):
         super().__init__()
         self.users = df[user_ids]
+        self.user_features = df[user_features]
         self.items = df[item_ids]
+        self.item_features = df[item_features]
         self.timestamps = df[timestamps]
         self.sequence_length = sequence_length
         self.sequence_stride = sequence_stride
@@ -166,10 +226,22 @@ class TemporalInteractionNetworkDataset(torch.utils.data.Dataset):
         start = self.sequence_stride * index
         stop = start + self.sequence_length
         user_ids = self.users[start:stop].to_numpy()
+        user_features = self.user_features[start:stop].to_numpy()
         item_ids = self.items[start:stop].to_numpy()
+        item_features = self.item_features[start:stop].to_numpy()
         return (
-            torch.tensor(user_ids, device=self.device),
-            torch.tensor(item_ids, device=self.device),
+            torch.hstack(
+                (
+                    torch.tensor(user_ids, device=self.device).unsqueeze(1),
+                    torch.tensor(user_features, device=self.device),
+                )
+            ),
+            torch.hstack(
+                (
+                    torch.tensor(item_ids, device=self.device).unsqueeze(1),
+                    torch.tensor(item_features, device=self.device),
+                )
+            ),
         )
 
 
@@ -221,30 +293,59 @@ def train_epoch(
     loss_fn = assemble_loss_fn(settings.loss)
     num_batches = len(data)
     train_loss = 0
-    for user_sequences, item_sequences in tqdm(
+    for user_batch, item_batch in tqdm(
         data, desc="Training", leave=False, total=num_batches
     ):
-        batch_size, sequence_size = user_sequences.shape
-        model.initialize_batch_run(batch_size=batch_size)
-        loss = 0
-        if settings.training_heat_up:
-            heat_up_model(
-                model, user_sequences, item_sequences, length=settings.heat_up_length
-            )
-        model.train()
-        for i in range(
-            settings.heat_up_length if settings.training_heat_up else 0, sequence_size
-        ):
-            users, items = user_sequences[:, i], item_sequences[:, i]
-            user_embeddings, item_embeddings = model(users=users, items=items)
-            loss += loss_fn(user_embeddings, item_embeddings)
-        loss = loss / sequence_size
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-
-        train_loss += loss.item()
+        train_loss += training_step(
+            model, settings, optimizer, loss_fn, user_batch, item_batch
+        )
     return train_loss / num_batches
+
+
+def training_step(
+    model: torch.nn.Module,
+    settings: Settings,
+    optimizer: torch.optim.Optimizer,
+    loss_fn: callable,
+    user_sequences: torch.Tensor,
+    item_sequences: torch.Tensor,
+):
+    """Run training on one batch of sequences.
+
+    Arguments:
+    loss_fn: receive (user_embeddings, item_embeddings) as input and return a float.
+        user_embeddings: (batch_size, embedding_size) tensor
+        item_embeddings: (batch_size, embedding_size) tensor
+    user_sequences: (batch_size, sequence_length, 1 + nb_user_features) tensor.
+    item_sequences: (batch_size, sequence_length, 1 + nb_item_features) tensor.
+    """
+    batch_size, sequence_size, _ = user_sequences.shape
+    model.initialize_batch_run(batch_size=batch_size)
+    loss = 0
+    if settings.training_heat_up:
+        heat_up_model(
+            model, user_sequences, item_sequences, length=settings.heat_up_length
+        )
+    model.train()
+    for i in range(
+        settings.heat_up_length if settings.training_heat_up else 0, sequence_size
+    ):
+        users, items = user_sequences[:, i], item_sequences[:, i]
+        user_ids, item_ids = users[:, 0].to(torch.int32), items[:, 0].to(torch.int32)
+        user_features, item_features = users[:, 1:], items[:, 1:]
+        user_embeddings, item_embeddings = model(
+            user_ids=user_ids,
+            user_features=user_features,
+            item_ids=item_ids,
+            item_features=item_features,
+        )
+        loss += loss_fn(user_embeddings, item_embeddings)
+    loss = loss / sequence_size
+    loss.backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    return loss.item()
 
 
 def assemble_loss_fn(losses: dict[str:float]) -> callable:
@@ -278,8 +379,8 @@ def evaluate(
 
     Arguments:
     data: a contains batches of (users, items) tuples where
-        users: (batch_size, sequence_length)
-        items: (batch_size, sequence_length)
+        users: (batch_size, sequence_length, 1 + nb_user_features).
+        items: (batch_size, sequence_length, 1 + nb_item_features).
     """
     model.eval()
     num_batches = len(data)
@@ -287,6 +388,7 @@ def evaluate(
     test_loss = 0
     measures = {}
     with torch.no_grad():
+        # pylint: disable:locally-disabled, invalid-name
         for X in tqdm(data, desc="validation", leave=False):
             user_sequences, item_sequences = X
             batch_size = user_sequences.shape[0]
@@ -295,14 +397,14 @@ def evaluate(
                 model, user_sequences, item_sequences, length=settings.heat_up_length
             )
             for i in range(settings.heat_up_length, settings.sequence_length):
-                user_id, item_id = user_sequences[:, i], item_sequences[:, i]
+                users, items = user_sequences[:, i], item_sequences[:, i]
                 test_loss += evaluate_step(
                     model,
                     settings,
                     loss_fn,
                     measures,
-                    user_id,
-                    item_id,
+                    users,
+                    items,
                 )
     test_loss /= num_batches * (settings.sequence_length - settings.heat_up_length)
     for measure in measures.keys():
@@ -313,19 +415,30 @@ def evaluate(
 
 
 def heat_up_model(
-    model: torch.nn.Module, users: torch.Tensor, items: torch.Tensor, length: int
+    model: torch.nn.Module,
+    user_sequences: torch.Tensor,
+    item_sequences: torch.Tensor,
+    length: int,
 ) -> None:
     """
     Run the model on the start of the sequence without evaluating.
 
     Arguments:
-    users: (batch_size, sequence_length) tensor.
-    items: (batch_size, sequence_length) tensor.
+    users: (batch_size, sequence_length, 1 + nb_user_features) tensor.
+    items: (batch_size, sequence_length, 1 + nb_item_features) tensor.
     length: must be less than sequence_length.
     """
     model.eval()
     for i in range(length):
-        model(users=users[:, i], items=items[:, i])
+        users, items = user_sequences[:, i], item_sequences[:, i]
+        user_ids, item_ids = users[:, 0].to(torch.int32), items[:, 0].to(torch.int32)
+        user_features, item_features = users[:, 1:], items[:, 1:]
+        model(
+            user_ids=user_ids,
+            user_features=user_features,
+            item_ids=item_ids,
+            item_features=item_features,
+        )
 
 
 def evaluate_step(
@@ -333,8 +446,8 @@ def evaluate_step(
     settings: Settings,
     loss_fn: callable,
     measures: dict[str, float],
-    user_id: torch.Tensor,
-    item_id: torch.Tensor,
+    users: torch.Tensor,
+    items: torch.Tensor,
 ):
     """Run evaluation of one step in a sequence.
 
@@ -343,23 +456,30 @@ def evaluate_step(
         user_embeddings: (batch_size, embedding_size) tensor
         item_embeddings: (batch_size, embedding_size) tensor
     measures: Dict where values are the sum of the metrics over all steps.
-    user_id: (batch_size) tensor.
-    item_id: (batch_size) tensor.
+    users: (batch_size, 1 + nb_user_features) tensor.
+    items: (batch_size, 1 + nb_item_features) tensor.
     """
-    batch_size = user_id.shape[0]
-    user_embedding = model(users=user_id.unsqueeze(1)).squeeze()
+    batch_size = users.shape[0]
+    user_ids, item_ids = users[:, 0].to(torch.int32), items[:, 0].to(torch.int32)
+    user_features, item_features = users[:, 1:], items[:, 1:]
+    user_embedding = model(user_ids=user_ids.unsqueeze(1)).squeeze()
     item_embeddings = model(
-        items=torch.arange(settings.nb_items, device=settings.device).repeat(
+        item_ids=torch.arange(settings.nb_items, device=settings.device).repeat(
             batch_size, 1
         )
     )
-    expected_item_embeddings = item_embeddings[torch.arange(batch_size), item_id]
+    expected_item_embeddings = item_embeddings[torch.arange(batch_size), item_ids]
     test_loss = loss_fn(user_embedding, expected_item_embeddings)
     compute_metrics(
-        settings.metrics, measures, item_id, user_embedding, item_embeddings
+        settings.metrics, measures, item_ids, user_embedding, item_embeddings
     )
     # Communicate the interaction to the model for memory updates.
-    model(users=user_id, items=item_id)
+    model(
+        user_ids=user_ids,
+        user_features=user_features,
+        item_ids=item_ids,
+        item_features=item_features,
+    )
     return test_loss
 
 
@@ -378,7 +498,8 @@ def compute_metrics(
     measures: the sums of the evaluations of the metrics over past data.
     item_id: (batch_size) tensor. Contains the id of the expected items.
     user_embeddings: (batch_size, embedding size) tensor.
-    item_embeddings: (nb_items, embedding size) tensor. Contains the embeddings for every single item.
+    item_embeddings: (nb_items, embedding size) tensor.
+        Contains the embeddings for every single item.
     """
     for metric in metrics_list:
         measures[metric] = measures.get(metric, 0) + pick_metric(metric)(

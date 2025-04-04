@@ -3,12 +3,12 @@ user_id_column: user_id
 item_id_column: item_id
 timestamp_column: timestamp
 
-epochs: 200
+epochs: 400
 train_ratio: 0.8
 sequence_length: 1
-sequence_stride: 32
-train_batch_size: 128
-test_batch_size: 128
+sequence_stride: 1
+train_batch_size: 32768
+test_batch_size: 4096
 heat_up_length: 0
 
 model_name: TrainableEmbeddings
@@ -20,3 +20,5 @@ loss:
 
 metrics:
   - mean_reciprocal_rank
+
+l2: 0

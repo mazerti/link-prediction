@@ -30,10 +30,12 @@ class Settings:
         self.dataset = config["dataset"]
 
         # Facultative attributes
+        self.user_features: list[str] = []
+        self.item_features: list[str] = []
         self.evaluate_every: int = 1
         self.heat_up_length: int = 0
         self.training_heat_up: bool = False
-        self.l2: float = 0.001
+        self.l2: float = 0
 
         # Fill in attributes from config
         for key, value in config.items():

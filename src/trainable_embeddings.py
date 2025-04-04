@@ -39,28 +39,38 @@ class TrainableEmbeddings(torch.nn.Module):
 
         There is nothing to do for that model."""
 
-    # pylint: disable=locally-disabled, invalid-name, not-callable
+    # pylint: disable=locally-disabled, invalid-name, not-callable, unused-argument
     def forward(
         self,
-        data: None | tuple[torch.Tensor, torch.Tensor] = None,
-        users: None | tuple[torch.Tensor, torch.Tensor] = None,
-        items: None | tuple[torch.Tensor, torch.Tensor] = None,
+        user_ids: None | tuple[torch.Tensor, torch.Tensor] = None,
+        user_features: any = None,
+        item_ids: None | tuple[torch.Tensor, torch.Tensor] = None,
+        item_features: any = None,
     ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
-        """Forward pass
+        """Return the embeddings for the requested users/items.
 
-        Arguments:
-        data: passing data=(users, items) is equivalent to passing users=users, items=items
-        users: (batch_size) tensor.
-        items: (batch_size) tensor.
+        This function can be called either on interactions, on a set of users or on a set of items
+
+        When called on interaction, it must receive as input:
+            user_ids: (batch_size) tensor.
+            item_ids: (batch_size) tensor.
+            user_features: not supported by this model but required by the framework.
+            item_features: not supported by this model but required by the framework.
+        The function will return the embeeddings for the given users and items.
+
+        When called with only users or only items, the expected input are
+            users: (batch_size, nb_users_to_extract) tensor.
+            or
+            items: (batch_size, nb_items_to_extract) tensor.
+        The function will return the embeeddings for the given users and items.
         """
-        if data is not None or (users is not None and items is not None):
-            user_ids, item_ids = data or (users, items)
+        if user_ids is not None and item_ids is not None:
             return (
                 torch.nn.functional.normalize(self.user_embeddings(user_ids), dim=-1),
                 torch.nn.functional.normalize(self.item_embeddings(item_ids), dim=-1),
             )
-        if users is not None:
-            return torch.nn.functional.normalize(self.user_embeddings(users), dim=-1)
-        if items is not None:
-            return torch.nn.functional.normalize(self.item_embeddings(items), dim=-1)
+        if user_ids is not None:
+            return torch.nn.functional.normalize(self.user_embeddings(user_ids), dim=-1)
+        if item_ids is not None:
+            return torch.nn.functional.normalize(self.item_embeddings(item_ids), dim=-1)
         raise ValueError("Invalid input, provide user, item, or both.")

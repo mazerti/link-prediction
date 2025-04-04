@@ -2,6 +2,10 @@ dataset: /data/gen-limnet/lastfm.csv
 user_id_column: user_id
 item_id_column: item_id
 timestamp_column: timestamp
+user_features:
+  - delta_users
+item_features:
+  - delta_items
 
 epochs: 200
 train_ratio: 0.8
@@ -21,3 +25,5 @@ loss:
 
 metrics:
   - mean_reciprocal_rank
+
+l2: 0.0001

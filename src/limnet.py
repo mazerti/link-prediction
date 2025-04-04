@@ -31,14 +31,22 @@ class LiMNet(torch.nn.Module):
         self.nb_users = settings.nb_users
         self.nb_items = settings.nb_items
         self.device = settings.device
+        input_size = (
+            self.embedding_size
+            + len(settings.user_features)
+            + self.embedding_size
+            + len(settings.item_features)
+        )
         self.user_cell = torch.nn.GRUCell(
-            2 * self.embedding_size, self.embedding_size, device=settings.device
+            input_size, self.embedding_size, device=settings.device
         )
         self.item_cell = torch.nn.GRUCell(
-            2 * self.embedding_size, self.embedding_size, device=settings.device
+            input_size, self.embedding_size, device=settings.device
         )
 
-    def initialize_batch_run(self, batch_size: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def initialize_batch_run(
+        self, batch_size: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Initialize the model's memory.
 
         Returns:
@@ -58,67 +66,90 @@ class LiMNet(torch.nn.Module):
     # pylint: disable=locally-disabled, invalid-name, not-callable
     def forward(
         self,
-        data: None | tuple[torch.Tensor, torch.Tensor] = None,
-        users: None | tuple[torch.Tensor, torch.Tensor] = None,
-        items: None | tuple[torch.Tensor, torch.Tensor] = None,
+        user_ids: None | torch.Tensor = None,
+        user_features: None | torch.Tensor = None,
+        item_ids: None | torch.Tensor = None,
+        item_features: None | torch.Tensor = None,
     ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
-        """Forward pass, when called for an edge (user and item data) update memory. Otherwise just return the current state of the memory.
+        """Return the embeddings for the requested users/items.
 
-        When feeding only user/items for inference, make sure to initialize the memory by feeding at least 1 interaction beforehand.
+        This function can be called either to make the model memorize an interaction or to return
+        the current embeddings.
 
-        Arguments:
-        data: passing data=(users, items) is equivalent to passing users=users, items=items
-        users: (batch_size) tensor.
-        items: (batch_size) tensor.
+        When watching an interaction, it must receive as input:
+            user_ids: (batch_size) tensor.
+            item_ids: (batch_size) tensor.
+            user_features: (batch_size, nb_user_features) tensor. nb_user_features can be 0.
+            item_features: (batch_size, nb_item_features) tensor. nb_item_features can be 0.
+        The function will compute the new embeeddings for the given users and items, and update
+        the current memory with these new embeddings.
+
+        When called with only users or only items, the expected input are
+            users: (batch_size, nb_users_to_extract) tensor.
+            or
+            items: (batch_size, nb_items_to_extract) tensor.
+        This will simply return the current state of the memory for the requested users/items.
+        If features are given as input they will be disregarded since no computation is performed.
+        Make sure to always initialize the memory by feeding at least 1 interaction before using the
+        model this way.
         """
-        if data is not None or (users is not None and items is not None):
-            user_ids, item_ids = data or (users, items)
-            return self.forward_edge_sequence(user_ids, item_ids)
-        if users is not None:
-            return self.extract_user_embeddings(users)
-        if items is not None:
-            return self.extract_item_embeddings(items)
+        if user_ids is not None and item_ids is not None:
+            return self.forward_edge_sequence(
+                user_ids, user_features, item_ids, item_features
+            )
+        if user_ids is not None:
+            return self.extract_user_embeddings(user_ids)
+        if item_ids is not None:
+            return self.extract_item_embeddings(item_ids)
         raise ValueError("Invalid input, provide user, item, or both.")
 
     def forward_edge_sequence(
         self,
-        users: torch.Tensor,
-        items: torch.Tensor,
+        user_ids: torch.Tensor,
+        user_features: torch.Tensor,
+        item_ids: torch.Tensor,
+        item_features: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Process a sequence of incomming edges, updating the memory (i.e. embedding) for the interacting nodes.
+        """Process a sequence of incomming edges and updates the memory for the interacting nodes.
 
         Arguments:
-        users: (batch_size) tensor.
-        items: (batch_size) tensor.
+        user_ids: (batch_size) tensor.
+        item_ids: (batch_size) tensor.
+        user_features: (batch_size, nb_user_features) tensor. nb_user_features can be 0.
+        item_features: (batch_size, nb_item_features) tensor. nb_item_features can be 0.
 
         Returns:
         user_embeddings: (batch_size, embedding_size) tensor.
         item_embeddings: (batch_size, embedding_size) tensor.
         """
-        batch_size = users.shape[0]
-        assert list(items.shape) == [
+        batch_size = user_ids.shape[0]
+        assert list(item_ids.shape) == [
             batch_size
-        ], f"{items.shape=}, {self.item_memory.shape=}"
-        user_embeddings = self.user_memory[torch.arange(batch_size), users, :]
-        item_embeddings = self.item_memory[torch.arange(batch_size), items, :]
-        user_input = torch.hstack((user_embeddings, item_embeddings))
-        item_input = torch.hstack((item_embeddings, user_embeddings))
+        ], f"{item_ids.shape=}, {self.item_memory.shape=}"
+        user_embeddings = self.user_memory[torch.arange(batch_size), user_ids, :]
+        item_embeddings = self.item_memory[torch.arange(batch_size), item_ids, :]
+        user_input = torch.hstack(
+            (user_embeddings, user_features, item_embeddings, item_features)
+        ).to(torch.float32)
+        item_input = torch.hstack(
+            (item_embeddings, item_features, user_embeddings, user_features)
+        ).to(torch.float32)
 
         new_user_embeddings = self.user_cell(user_input)
         new_item_embeddings = self.item_cell(item_input)
 
-        self.user_memory[torch.arange(batch_size), users, :] = new_user_embeddings
-        self.item_memory[torch.arange(batch_size), items, :] = new_item_embeddings
+        self.user_memory[torch.arange(batch_size), user_ids, :] = new_user_embeddings
+        self.item_memory[torch.arange(batch_size), item_ids, :] = new_item_embeddings
         return new_user_embeddings, new_item_embeddings
 
     def extract_user_embeddings(self, users: torch.Tensor) -> torch.Tensor:
         """Return the current state of the memory for the given users.
 
         Arguments:
-        users: (batch_size, users_to_extract) tensor.
-        Returns: (batch_size, users_to_extract, embedding_size) tensor.
+        users: (batch_size, nb_users_to_extract) tensor.
+        Returns: (batch_size, nb_users_to_extract, embedding_size) tensor.
         """
-        batch_size, user_to_extract = users.shape
+        batch_size, _ = users.shape
         assert (
             batch_size == self.user_memory.shape[0]
         ), f"shape mismatch: {batch_size} as input while {self.user_memory.shape[0]} for memory."
@@ -128,11 +159,11 @@ class LiMNet(torch.nn.Module):
         """Return the current state of the memory for the given items.
 
         Arguments:
-        items: (batch_size, items_to_extract) tensor.
+        items: (batch_size, nb_items_to_extract) tensor.
 
-        Returns: (batch_size, items_to_extract, embedding_size) tensor.
+        Returns: (batch_size, nb_items_to_extract, embedding_size) tensor.
         """
-        batch_size, item_to_extract = items.shape
+        batch_size, _ = items.shape
         assert (
             batch_size == self.item_memory.shape[0]
         ), f"shape mismatch: {batch_size} as input while {self.item_memory.shape[0]} for memory."

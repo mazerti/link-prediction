@@ -3,18 +3,26 @@ with Lightweight Memory Networks' by L.Giaretta et al."""
 
 import torch
 
-from settings import Settings
+from context import Context
 
 
 class LiMNet(torch.nn.Module):
     """Own implementation of the Lightweight Memory Network."""
 
     def __init__(
-        self, embedding_size: int, initialization: callable, *args, **kwargs
+        self,
+        embedding_size: int,
+        initialization: callable,
+        normalize=True,
+        dropout_rate=0,
+        *args,
+        **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.embedding_size: int = embedding_size
         self.initialization: callable = getattr(torch.nn.init, initialization)
+        self.normalize = normalize
+        self.dropout_rate = dropout_rate
 
         self.user_memory: torch.Tensor = None
         self.item_memory: torch.Tensor = None
@@ -26,11 +34,12 @@ class LiMNet(torch.nn.Module):
         self.nb_items: int
         self.device: torch.DeviceObjType
 
-    def build(self, settings: Settings) -> None:
+    def build(self, settings: Context) -> None:
         """Builds the model."""
         self.nb_users = settings.nb_users
         self.nb_items = settings.nb_items
         self.device = settings.device
+        self.dropout = torch.nn.Dropout(self.dropout_rate)
         input_size = (
             self.embedding_size
             + len(settings.user_features)
@@ -63,7 +72,6 @@ class LiMNet(torch.nn.Module):
         self.initialization(self.item_memory)
         return self.user_memory, self.item_memory
 
-    # pylint: disable=locally-disabled, invalid-name, not-callable
     def forward(
         self,
         user_ids: None | torch.Tensor = None,
@@ -135,8 +143,15 @@ class LiMNet(torch.nn.Module):
             (item_embeddings, item_features, user_embeddings, user_features)
         ).to(torch.float32)
 
-        new_user_embeddings = torch.nn.functional.normalize(self.user_cell(user_input), dim=1)
-        new_item_embeddings = torch.nn.functional.normalize(self.item_cell(item_input), dim=1)
+        new_user_embeddings = self.dropout(self.user_cell(user_input))
+        new_item_embeddings = self.dropout(self.item_cell(item_input))
+        if self.normalize:
+            new_user_embeddings = torch.nn.functional.normalize(
+                new_user_embeddings, dim=1
+            )
+            new_item_embeddings = torch.nn.functional.normalize(
+                new_item_embeddings, dim=1
+            )
 
         self.user_memory[torch.arange(batch_size), user_ids, :] = new_user_embeddings
         self.item_memory[torch.arange(batch_size), item_ids, :] = new_item_embeddings

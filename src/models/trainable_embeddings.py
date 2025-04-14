@@ -2,15 +2,16 @@
 
 import torch
 
-from settings import Settings
+from context import Context
 
 
 class TrainableEmbeddings(torch.nn.Module):
     """Simple straightforward model consisting of one layer of trainable embeddings."""
 
-    def __init__(self, embedding_size: int, **kwargs):
+    def __init__(self, embedding_size: int, normalize=True, **kwargs):
         super().__init__(**kwargs)
         self.embedding_size: int = embedding_size
+        self.normalize = normalize
 
         self.user_embeddings: torch.nn.Embedding = None
         self.item_embeddings: torch.nn.Embedding = None
@@ -19,7 +20,7 @@ class TrainableEmbeddings(torch.nn.Module):
         self.nb_users: int
         self.nb_items: int
 
-    def build(self, settings: Settings) -> None:
+    def build(self, settings: Context) -> None:
         """Builds the model."""
         self.complete_arguments(settings)
         self.user_embeddings = torch.nn.Embedding(
@@ -29,7 +30,7 @@ class TrainableEmbeddings(torch.nn.Module):
             self.nb_items, self.embedding_size, device=settings.device
         )
 
-    def complete_arguments(self, settings: Settings):
+    def complete_arguments(self, settings: Context):
         """Complete the known arguments with up to date settings."""
         self.nb_users = settings.nb_users
         self.nb_items = settings.nb_items
@@ -39,7 +40,7 @@ class TrainableEmbeddings(torch.nn.Module):
 
         There is nothing to do for that model."""
 
-    # pylint: disable=locally-disabled, invalid-name, not-callable, unused-argument
+    # pylint: disable=locally-disabled, unused-argument
     def forward(
         self,
         user_ids: None | tuple[torch.Tensor, torch.Tensor] = None,
@@ -65,9 +66,16 @@ class TrainableEmbeddings(torch.nn.Module):
         The function will return the embeeddings for the given users and items.
         """
         if user_ids is not None and item_ids is not None:
+            user_embeddings = self.user_embeddings(user_ids)
+            item_embeddings = self.item_embeddings(item_ids)
+            if self.normalize:
+                return (
+                    torch.nn.functional.normalize(user_embeddings, dim=-1),
+                    torch.nn.functional.normalize(item_embeddings, dim=-1),
+                )
             return (
-                torch.nn.functional.normalize(self.user_embeddings(user_ids), dim=-1),
-                torch.nn.functional.normalize(self.item_embeddings(item_ids), dim=-1),
+                user_embeddings(user_ids),
+                item_embeddings(item_ids),
             )
         if user_ids is not None:
             return torch.nn.functional.normalize(self.user_embeddings(user_ids), dim=-1)

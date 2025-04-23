@@ -310,7 +310,7 @@ def evaluate_step(
     batch_size = users.shape[0]
     user_ids, item_ids = users[:, 0].to(torch.int32), items[:, 0].to(torch.int32)
     user_features, item_features = users[:, 1:], items[:, 1:]
-    user_embedding = model(user_ids=user_ids.unsqueeze(1)).squeeze()
+    user_embedding = model(user_ids=user_ids.unsqueeze(1)).squeeze(dim=1)
     item_embeddings = model(
         item_ids=torch.arange(context.nb_items, device=context.device).repeat(
             batch_size, 1

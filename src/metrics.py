@@ -103,8 +103,8 @@ def frobenius_regularization(
     embeddings = torch.cat((user_embeddings, item_embeddings), dim=-1).unsqueeze(-2)
     regularization_matrix = torch.matmul(
         embeddings.transpose(-1, -2), embeddings
-    ) - torch.eye(embeddings.shape[-1])
-    return regularization_matrix.norm()
+    ) - torch.eye(embeddings.shape[-1], device=embeddings.device)
+    return regularization_matrix.norm(dim=(-1, -2)).mean()
 
 
 def mean_squared_error(user_embeddings: torch.Tensor, item_embeddings: torch.Tensor):

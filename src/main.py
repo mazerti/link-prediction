@@ -2,6 +2,7 @@
 
 # standard imports
 import argparse
+from collections.abc import Callable
 import traceback
 
 # third-party imports
@@ -14,7 +15,7 @@ import yaml
 # first-party imports
 from context import Context
 import data_loader
-import metrics
+from metrics import pick_metric
 from models.deepred import DeePRed
 from models.limnet import LiMNet
 from models.trainable_embeddings import TrainableEmbeddings
@@ -134,7 +135,7 @@ def train_epoch(
     model: torch.nn.Module,
     data: torch.utils.data.DataLoader,
     context: Context,
-):
+) -> torch.Tensor:
     """Train one epoch."""
     loss_fn = assemble_loss_fn(context.loss)
     num_batches = len(data)
@@ -142,13 +143,15 @@ def train_epoch(
     for user_batch, item_batch in tqdm(
         data, desc="Training", leave=False, total=num_batches
     ):
-        train_loss += training_step(
-            model, context, context.optimizer, loss_fn, user_batch, item_batch
+        train_loss += model.training_sequence(
+            context, context.optimizer, loss_fn, user_batch, item_batch
         )
     return train_loss / num_batches
 
 
-def assemble_loss_fn(losses: dict[str:float]) -> callable:
+def assemble_loss_fn(
+    losses: dict[str, float],
+) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
     """Generate a loss function as a weighted sum of the listed losses."""
 
     def loss_fn(
@@ -163,81 +166,6 @@ def assemble_loss_fn(losses: dict[str:float]) -> callable:
         )
 
     return loss_fn
-
-
-def pick_metric(metric_name: str) -> callable:
-    """Select the implementation of the metric function matching the given function name."""
-    return getattr(metrics, metric_name)
-
-
-def training_step(
-    model: torch.nn.Module,
-    context: Context,
-    optimizer: torch.optim.Optimizer,
-    loss_fn: callable,
-    user_sequences: torch.Tensor,
-    item_sequences: torch.Tensor,
-):
-    """Run training on one batch of sequences.
-
-    Arguments:
-    loss_fn: receive (user_embeddings, item_embeddings) as input and return a float.
-        user_embeddings: (batch_size, embedding_size) tensor
-        item_embeddings: (batch_size, embedding_size) tensor
-    user_sequences: (batch_size, sequence_length, 1 + nb_user_features) tensor.
-    item_sequences: (batch_size, sequence_length, 1 + nb_item_features) tensor.
-    """
-    batch_size, sequence_size, _ = user_sequences.shape
-    model.initialize_batch_run(batch_size=batch_size)
-    loss = 0
-    heat_up_model(
-        model, user_sequences, item_sequences, length=context.train_heat_up_length
-    )
-    model.train()
-    for i in range(context.train_heat_up_length, sequence_size):
-        users, items = user_sequences[:, i], item_sequences[:, i]
-        user_ids, item_ids = users[:, 0].to(torch.int32), items[:, 0].to(torch.int32)
-        user_features, item_features = users[:, 1:], items[:, 1:]
-        user_embeddings, item_embeddings = model(
-            user_ids=user_ids,
-            user_features=user_features,
-            item_ids=item_ids,
-            item_features=item_features,
-        )
-        loss += loss_fn(user_embeddings, item_embeddings)
-    loss = loss / sequence_size
-    loss.backward()
-    optimizer.step()
-    optimizer.zero_grad()
-
-    return loss.item()
-
-
-def heat_up_model(
-    model: torch.nn.Module,
-    user_sequences: torch.Tensor,
-    item_sequences: torch.Tensor,
-    length: int,
-) -> None:
-    """
-    Run the model on the start of the sequence without evaluating.
-
-    Arguments:
-    users: (batch_size, sequence_length, 1 + nb_user_features) tensor.
-    items: (batch_size, sequence_length, 1 + nb_item_features) tensor.
-    length: must be less than sequence_length.
-    """
-    model.eval()
-    for i in range(length):
-        users, items = user_sequences[:, i], item_sequences[:, i]
-        user_ids, item_ids = users[:, 0].to(torch.int32), items[:, 0].to(torch.int32)
-        user_features, item_features = users[:, 1:], items[:, 1:]
-        model(
-            user_ids=user_ids,
-            user_features=user_features,
-            item_ids=item_ids,
-            item_features=item_features,
-        )
 
 
 def evaluate(
@@ -258,27 +186,11 @@ def evaluate(
     test_loss = 0
     measures = {}
     with torch.no_grad():
-        # pylint: disable:locally-disabled, invalid-name
         for X in tqdm(data, desc="validation", leave=False):
             user_sequences, item_sequences = X
-            batch_size = user_sequences.shape[0]
-            model.initialize_batch_run(batch_size=batch_size)
-            heat_up_model(
-                model,
-                user_sequences,
-                item_sequences,
-                length=context.test_heat_up_length,
+            test_loss += model.evaluate_sequence(
+                context, loss_fn, measures, user_sequences, item_sequences
             )
-            for i in range(context.test_heat_up_length, context.test_sequence_length):
-                users, items = user_sequences[:, i], item_sequences[:, i]
-                test_loss += evaluate_step(
-                    model,
-                    context,
-                    loss_fn,
-                    measures,
-                    users,
-                    items,
-                )
     test_loss /= num_batches * (
         context.test_sequence_length - context.test_heat_up_length
     )
@@ -287,72 +199,6 @@ def evaluate(
             context.test_sequence_length - context.test_heat_up_length
         )
     return {"Testing loss": test_loss} | measures
-
-
-def evaluate_step(
-    model: torch.nn.Module,
-    context: Context,
-    loss_fn: callable,
-    measures: dict[str, float],
-    users: torch.Tensor,
-    items: torch.Tensor,
-):
-    """Run evaluation of one step in a sequence.
-
-    Arguments:
-    loss_fn: receive (user_embeddings, item_embeddings) as input and return a float.
-        user_embeddings: (batch_size, embedding_size) tensor
-        item_embeddings: (batch_size, embedding_size) tensor
-    measures: Dict where values are the sum of the metrics over all steps.
-    users: (batch_size, 1 + nb_user_features) tensor.
-    items: (batch_size, 1 + nb_item_features) tensor.
-    """
-    batch_size = users.shape[0]
-    user_ids, item_ids = users[:, 0].to(torch.int32), items[:, 0].to(torch.int32)
-    user_features, item_features = users[:, 1:], items[:, 1:]
-    user_embedding = model(user_ids=user_ids.unsqueeze(1)).squeeze(dim=1)
-    item_embeddings = model(
-        item_ids=torch.arange(context.nb_items, device=context.device).repeat(
-            batch_size, 1
-        )
-    )
-    expected_item_embeddings = item_embeddings[torch.arange(batch_size), item_ids]
-    test_loss = loss_fn(user_embedding, expected_item_embeddings)
-    compute_metrics(
-        context.metrics, measures, item_ids, user_embedding, item_embeddings
-    )
-    # Communicate the interaction to the model for memory updates.
-    model(
-        user_ids=user_ids,
-        user_features=user_features,
-        item_ids=item_ids,
-        item_features=item_features,
-    )
-    return test_loss
-
-
-def compute_metrics(
-    metrics_list: list[str],
-    measures: dict[str:float],
-    item_id: torch.Tensor,
-    user_embedding: torch.Tensor,
-    item_embeddings: torch.Tensor,
-):
-    """
-    Evaluates the metrics on the given embeddings and adds them to the past measures.
-
-    Arguments:
-    metrics: the name of the metrics function as defined in the metric module.
-    measures: the sums of the evaluations of the metrics over past data.
-    item_id: (batch_size) tensor. Contains the id of the expected items.
-    user_embeddings: (batch_size, embedding size) tensor.
-    item_embeddings: (nb_items, embedding size) tensor.
-        Contains the embeddings for every single item.
-    """
-    for metric in metrics_list:
-        measures[metric] = measures.get(metric, 0) + pick_metric(metric)(
-            user_embedding, item_embeddings, item_id
-        )
 
 
 if __name__ == "__main__":

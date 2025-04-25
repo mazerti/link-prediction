@@ -3,6 +3,30 @@
 import torch
 
 
+def compute_metrics(
+    metrics_list: list[str],
+    measures: dict[str:float],
+    item_id: torch.Tensor,
+    user_embedding: torch.Tensor,
+    item_embeddings: torch.Tensor,
+):
+    """
+    Evaluates the metrics on the given embeddings and adds them to the past measures.
+
+    Arguments:
+    metrics: the name of the metrics function as defined in the metric module.
+    measures: the sums of the evaluations of the metrics over past data.
+    item_id: (batch_size) tensor. Contains the id of the expected items.
+    user_embeddings: (batch_size, embedding size) tensor.
+    item_embeddings: (nb_items, embedding size) tensor.
+        Contains the embeddings for every single item.
+    """
+    for metric in metrics_list:
+        measures[metric] = measures.get(metric, 0) + pick_metric(metric)(
+            user_embedding, item_embeddings, item_id
+        )
+
+
 def l2_mrr(
     user_embedding: torch.Tensor,
     item_embeddings: torch.Tensor,
@@ -116,3 +140,8 @@ def mean_squared_error(user_embeddings: torch.Tensor, item_embeddings: torch.Ten
     """
     loss_fn = torch.nn.MSELoss()
     return loss_fn(user_embeddings, item_embeddings)
+
+
+def pick_metric(metric_name: str) -> callable:
+    """Select the implementation of the metric function matching the given function name."""
+    return globals()[metric_name]

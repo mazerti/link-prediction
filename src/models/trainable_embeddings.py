@@ -3,7 +3,6 @@
 from collections.abc import Callable
 
 import torch
-from tqdm import tqdm
 
 from context import Context
 from metrics import compute_metrics
@@ -38,11 +37,6 @@ class TrainableEmbeddings(torch.nn.Module):
         """Complete the known arguments with up to date settings."""
         self.nb_users = settings.nb_users
         self.nb_items = settings.nb_items
-
-    def initialize_batch_run(self, batch_size: int) -> None:
-        """Prepare the model before processing a batch.
-
-        There is nothing to do for that model."""
 
     # pylint: disable=locally-disabled, unused-argument
     def forward(
@@ -104,24 +98,20 @@ class TrainableEmbeddings(torch.nn.Module):
         user_sequences: (batch_size, sequence_length, 1 + nb_user_features) tensor.
         item_sequences: (batch_size, sequence_length, 1 + nb_item_features) tensor.
         """
-        batch_size, sequence_size, _ = user_sequences.shape
-        self.initialize_batch_run(batch_size=batch_size)
-        loss = 0
         self.train()
-        for i in range(sequence_size):
-            users, items = user_sequences[:, i], item_sequences[:, i]
-            user_ids, item_ids = users[:, 0].to(torch.int32), items[:, 0].to(
-                torch.int32
-            )
-            user_features, item_features = users[:, 1:], items[:, 1:]
-            user_embeddings, item_embeddings = self.forward(
-                user_ids=user_ids,
-                user_features=user_features,
-                item_ids=item_ids,
-                item_features=item_features,
-            )
-            loss += loss_fn(user_embeddings, item_embeddings)
-        loss = loss / sequence_size
+        user_batch, item_batch = user_sequences.flatten(0, 1), item_sequences.flatten(
+            0, 1
+        )
+        user_ids = user_batch[:, 0].to(torch.int32)
+        item_ids = item_batch[:, 0].to(torch.int32)
+        user_features, item_features = user_batch[:, 1:], item_batch[:, 1:]
+        user_embeddings, item_embeddings = self.forward(
+            user_ids=user_ids,
+            user_features=user_features,
+            item_ids=item_ids,
+            item_features=item_features,
+        )
+        loss = loss_fn(user_embeddings, item_embeddings)
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -145,45 +135,13 @@ class TrainableEmbeddings(torch.nn.Module):
         user_sequences: (batch_size, sequence_length, 1 + nb_user_features) tensor.
         item_sequences: (batch_size, sequence_length, 1 + nb_item_features) tensor.
         """
-        batch_size = user_sequences.shape[0]
-        self.initialize_batch_run(batch_size=batch_size)
-        test_loss = 0
-        for i in tqdm(
-            range(context.test_sequence_length),
-            desc="sequence",
-            leave=False,
-        ):
-            users, items = user_sequences[:, i], item_sequences[:, i]
-            test_loss += self.evaluate_step(
-                context,
-                loss_fn,
-                measures,
-                users,
-                items,
-            )
-        return test_loss
-
-    def evaluate_step(
-        self: torch.nn.Module,
-        context: Context,
-        loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
-        measures: dict[str, float],
-        users: torch.Tensor,
-        items: torch.Tensor,
-    ):
-        """Run evaluation of one step in a sequence.
-
-        Arguments:
-        loss_fn: receive (user_embeddings, item_embeddings) as input and return a float.
-            user_embeddings: (batch_size, embedding_size) tensor
-            item_embeddings: (batch_size, embedding_size) tensor
-        measures: Dict where values are the sum of the metrics over all steps.
-        users: (batch_size, 1 + nb_user_features) tensor.
-        items: (batch_size, 1 + nb_item_features) tensor.
-        """
-        batch_size = users.shape[0]
-        user_ids, item_ids = users[:, 0].to(torch.int32), items[:, 0].to(torch.int32)
-        user_features, item_features = users[:, 1:], items[:, 1:]
+        user_batch = user_sequences.flatten(0, 1)
+        item_batch = item_sequences.flatten(0, 1)
+        batch_size = user_batch.shape[0]
+        user_ids, item_ids = user_batch[:, 0].to(torch.int32), item_batch[:, 0].to(
+            torch.int32
+        )
+        user_features, item_features = user_batch[:, 1:], item_batch[:, 1:]
         user_embedding = self.forward(user_ids=user_ids.unsqueeze(1)).squeeze(dim=1)
         item_embeddings = self.forward(
             item_ids=torch.arange(context.nb_items, device=context.device).repeat(

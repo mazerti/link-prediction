@@ -5,11 +5,12 @@ timestamp_column: timestamp
 
 epochs: 400
 train_ratio: 0.8
-sequence_length: 1
-sequence_stride: 1
+train_sequence_length: 1
+train_sequence_stride: 1
 train_batch_size: 32768
-test_batch_size: 4096
-heat_up_length: 0
+test_sequence_length: 1
+test_sequence_stride: 1
+test_batch_size: 8192
 
 model_name: TrainableEmbeddings
 model_attributes:
@@ -19,6 +20,9 @@ loss:
   expressivity_loss: 1
 
 metrics:
-  - mean_reciprocal_rank
+  - l2_mrr
+  - dot_product_mrr
 
 l2: 0
+
+learning_rate: 0.1

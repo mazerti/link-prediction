@@ -1,0 +1,33 @@
+dataset: /data/gen-limnet/wikipedia.csv
+user_id_column: user_id
+item_id_column: item_id
+timestamp_column: timestamp
+
+epochs: 300
+train_ratio: 0.8
+train_sequence_length: 1
+train_heat_up_length: 0
+train_sequence_stride: 1
+# train_batch_size: 8192
+train_batch_size: 512
+test_sequence_length: 2048
+test_heat_up_length: 1024
+test_sequence_stride: 1024
+test_batch_size: 512
+
+model_name: DeePRed
+model_attributes:
+  embedding_size: 128
+  history_size: 50
+  pooling: mean
+  dropout_rate: 0.7
+loss:
+  dot_product_mse: 1
+  frobenius_regularization: 0.5
+
+metrics:
+  - l2_mrr
+  - dot_product_mrr
+
+l2: 0
+learning_rate: 0.0001

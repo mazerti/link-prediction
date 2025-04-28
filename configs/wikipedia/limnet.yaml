@@ -2,19 +2,17 @@ dataset: /data/gen-limnet/wikipedia.csv
 user_id_column: user_id
 item_id_column: item_id
 timestamp_column: timestamp
-user_features:
-  - delta_users
-item_features:
-  - delta_items
 
-epochs: 200
+epochs: 300
 train_ratio: 0.8
-sequence_length: 128
-heat_up_length: 96
-sequence_stride: 30
+train_sequence_length: 128
+train_heat_up_length: 96
+train_sequence_stride: 30
 train_batch_size: 1024
+test_sequence_length: 128
+test_heat_up_length: 96
+test_sequence_stride: 30
 test_batch_size: 2048
-training_heat_up: False
 
 model_name: LiMNet
 model_attributes:
@@ -25,8 +23,8 @@ loss:
   expressivity_loss: 1
 
 metrics:
-  - mean_reciprocal_rank
+  - l2_mrr
+  - dot_product_mrr
 
-l2: 0
-
-what: normalize_embeddings
+l2: 0.0001
+learning_rate: 0.016

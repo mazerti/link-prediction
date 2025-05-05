@@ -3,6 +3,7 @@
 # standard imports
 import argparse
 from collections.abc import Callable
+import os
 import traceback
 
 # third-party imports
@@ -44,7 +45,7 @@ def parse_args() -> argparse.Namespace:
         "config",
         type=str,
         nargs="+",
-        help="Path to the configuration YAML file.",
+        help="Path to the checkpoint PTH or to the configuration YAML file.",
     )
     parser.add_argument(
         "--gpu", type=str, required=False, default=None, help="Specify a gpu to use."
@@ -64,7 +65,11 @@ def initialize_run(
     torch.nn.Module, torch.utils.data.DataLoader, Context, wandb.sdk.wandb_run.Run
 ]:
     """Initialize the context for the training."""
-    context = Context(load_config(config_name), args)
+    config_type = os.path.splitext(config_name)[-1]
+    if config_type == ".yaml":
+        context = Context(load_config(config_name), args)
+    elif config_type == ".pth":
+        context = Context.from_checkpoint(config_name, args)
 
     context.model = pick_model(context.model_name)(**context.model_attributes)
     if hasattr(context.model, "requested_features"):
@@ -117,7 +122,9 @@ def set_up_wandb(context: Context) -> wandb.sdk.wandb_run.Run:
     """Set up W&B for logging evaluation."""
     return wandb.init(
         project="link-prediction",
-        config=context.__dict__,
+        config=context.to_save(),
+        id=context.get_id(),
+        resume="allow",
     )
 
 
@@ -131,7 +138,10 @@ def train_model(
         results = {"epoch": epoch, "Training loss": training_loss}
         if epoch % context.evaluate_every == 0:
             results = results | evaluate(context.model, test_data, context)
+        if epoch % context.checkpoint_every == 0:
+            save_progress(context, epoch)
         context.run.log(results)
+    save_progress(context, context.epochs)
 
 
 def train_epoch(
@@ -202,6 +212,22 @@ def evaluate(
             context.test_sequence_length - context.test_heat_up_length
         )
     return {"Testing loss": test_loss} | measures
+
+
+def save_progress(context: Context, epoch: int):
+    """Save the progress of the training to a file."""
+    parent_folder = os.path.join("checkpoints", context.get_id())
+    os.makedirs(parent_folder, exist_ok=True)
+    checkpoint_file = os.path.join(parent_folder, f"checkpoint-{epoch}.pth")
+    torch.save(
+        {
+            "epoch": epoch,
+            "model_state_dict": context.model.state_dict(),
+            "optimizer_state_dict": context.optimizer.state_dict(),
+            "context": context.to_save(),
+        },
+        checkpoint_file,
+    )
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ def compute_metrics(
     measures: the sums of the evaluations of the metrics over past data.
     item_id: (batch_size) tensor. Contains the id of the expected items.
     user_embeddings: (batch_size, embedding size) tensor.
-    item_embeddings: (nb_items, embedding size) tensor.
+    item_embeddings: (batch_size, nb_items, embedding size) tensor.
         Contains the embeddings for every single item.
     """
     for metric in metrics_list:
@@ -76,11 +76,147 @@ def _mean_reciprocal_rank(
     expected_item_ids: (batch_size) tensor.
     scores: (batch_size, nb_items) tensor.
     """
+    true_item_rank = _compute_rank(expected_item_ids, scores)
+    with open(f"ranks{expected_item_ids.device}.txt", "+a") as f:
+        torch.set_printoptions(profile="full")
+        print(true_item_rank, file=f)
+        torch.set_printoptions(profile="default")
+    return (1.0 / true_item_rank).float().mean().item()
+
+
+def l2_recall_at_1(
+    user_embedding: torch.Tensor,
+    item_embeddings: torch.Tensor,
+    expected_item_ids: torch.Tensor,
+) -> float:
+    """Computes the recall at k using l2 scoring.
+
+    Arguments:
+    user_embeddings: (batch_size, embedding_size) tensor
+    item_embeddings: (batch_size, nb_items, embedding_size) tensor
+    expected_item_ids: (batch_size) tensor
+    """
+    return _l2_recall_at_k(1, user_embedding, item_embeddings, expected_item_ids)
+
+
+def l2_recall_at_10(
+    user_embedding: torch.Tensor,
+    item_embeddings: torch.Tensor,
+    expected_item_ids: torch.Tensor,
+) -> float:
+    """Computes the recall at k using l2 scoring.
+
+    Arguments:
+    user_embeddings: (batch_size, embedding_size) tensor
+    item_embeddings: (batch_size, nb_items, embedding_size) tensor
+    expected_item_ids: (batch_size) tensor
+    """
+    return _l2_recall_at_k(10, user_embedding, item_embeddings, expected_item_ids)
+
+
+def _l2_recall_at_k(
+    k: int,
+    user_embedding: torch.Tensor,
+    item_embeddings: torch.Tensor,
+    expected_item_ids: torch.Tensor,
+) -> float:
+    """Computes the recall at k using l2 scoring.
+
+    Arguments:
+    user_embeddings: (batch_size, embedding_size) tensor
+    item_embeddings: (batch_size, nb_items, embedding_size) tensor
+    expected_item_ids: (batch_size) tensor
+    """
+    l2_distance_fn = torch.nn.PairwiseDistance(2)
+    scores = l2_distance_fn(user_embedding.unsqueeze(1), item_embeddings)
+    return _recall_at_k(k, expected_item_ids, scores)
+
+
+def dot_product_recall_at_1(
+    user_embedding: torch.Tensor,
+    item_embeddings: torch.Tensor,
+    expected_item_ids: torch.Tensor,
+) -> float:
+    """Computes the recall at k using dot product scoring.
+
+    Arguments:
+    user_embeddings: (batch_size, embedding_size) tensor
+    item_embeddings: (batch_size, nb_items, embedding_size) tensor
+    expected_item_ids: (batch_size) tensor
+    """
+    return _dot_product_recall_at_k(
+        1, user_embedding, item_embeddings, expected_item_ids
+    )
+
+
+def dot_product_recall_at_10(
+    user_embedding: torch.Tensor,
+    item_embeddings: torch.Tensor,
+    expected_item_ids: torch.Tensor,
+) -> float:
+    """Computes the recall at k using dot product scoring.
+
+    Arguments:
+    user_embeddings: (batch_size, embedding_size) tensor
+    item_embeddings: (batch_size, nb_items, embedding_size) tensor
+    expected_item_ids: (batch_size) tensor
+    """
+    return _dot_product_recall_at_k(
+        10, user_embedding, item_embeddings, expected_item_ids
+    )
+
+
+def _dot_product_recall_at_k(
+    k: int,
+    user_embedding: torch.Tensor,
+    item_embeddings: torch.Tensor,
+    expected_item_ids: torch.Tensor,
+) -> float:
+    """Computes the recall at k using dot product scoring.
+
+    Arguments:
+    user_embeddings: (batch_size, embedding_size) tensor
+    item_embeddings: (batch_size, nb_items, embedding_size) tensor
+    expected_item_ids: (batch_size) tensor
+    """
+    scores = torch.einsum("bd,bid->bi", user_embedding, item_embeddings)
+    return _recall_at_k(k, expected_item_ids, scores)
+
+
+def _recall_at_k(
+    k: int, expected_item_ids: torch.Tensor, scores: torch.Tensor
+) -> float:
+    """Computes the recall at k.
+
+    Can not be directly used as a metric, need to be combined with a scoring function (see
+    l2_recall_at_k or dot_product_recall_at_k).
+
+    Arguments:
+    expected_item_ids: (batch_size) tensor.
+    scores: (batch_size, nb_items) tensor.
+    """
+    true_item_rank = _compute_rank(expected_item_ids, scores)
+    return (true_item_rank <= k).sum().item() / true_item_rank.shape[0]
+
+
+def _compute_rank(
+    expected_item_ids: torch.Tensor, scores: torch.Tensor
+) -> torch.Tensor:
+    """
+    Computes the rank of the true items according to given scoring function.
+
+    Can not be directly used as a metric.
+
+    Arguments:
+    expected_item_ids: (batch_size) tensor.
+    scores: (batch_size, nb_items) tensor.
+    """
     _, ranked_items = scores.sort(dim=-1, descending=True)
     true_item_rank = (ranked_items == expected_item_ids.unsqueeze(1)).nonzero(
         as_tuple=True
     )[-1] + 1
-    return (1.0 / true_item_rank).float().mean().item()
+
+    return true_item_rank
 
 
 def dot_product_mse(user_embeddings: torch.Tensor, item_embeddings: torch.Tensor):

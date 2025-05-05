@@ -31,17 +31,16 @@ class Jodie(torch.nn.Module):
         self.device: torch.DeviceObjType = settings.device
 
         self.user_long_term_embeddings: torch.nn.Embedding = (
-            lambda x: torch.nn.functional.one_hot(x, num_classes=settings.nb_users)
+            lambda x: torch.nn.functional.one_hot(
+                x.to(dtype=torch.long), num_classes=settings.nb_users
+            )
         )
         self.item_long_term_embeddings: torch.nn.Embedding = (
-            lambda x: torch.nn.functional.one_hot(x, num_classes=settings.nb_items)
+            lambda x: torch.nn.functional.one_hot(
+                x.to(dtype=torch.long), num_classes=settings.nb_items
+            )
         )
-        rnn_input_size: int = (
-            self.embedding_size
-            + len(settings.user_features)
-            + self.embedding_size
-            + len(settings.item_features)
-        )
+        rnn_input_size: int = 2 * self.embedding_size + len(settings.user_features)
         self.user_rnn: torch.nn.Linear = torch.nn.Linear(
             rnn_input_size, self.embedding_size, device=settings.device
         )
@@ -57,7 +56,9 @@ class Jodie(torch.nn.Module):
             self.embedding_size + self.nb_users + self.embedding_size + self.nb_items
         )
         self.prediction_layer: torch.nn.Linear = torch.nn.Linear(
-            prediction_input_size, self.embedding_size, device=settings.device
+            prediction_input_size,
+            self.nb_items + self.embedding_size,
+            device=settings.device,
         )
 
     def initialize_batch_run(
@@ -69,14 +70,12 @@ class Jodie(torch.nn.Module):
         user_memory: (batch_size, nb_users, embedding_size) tensor.
         item_memory: (batch_size, nb_items, embedding_size) tensor.
         """
-        self.user_memory = torch.zeros(
+        self.user_memory: torch.Tensor = torch.zeros(
             (batch_size, self.nb_users, self.embedding_size), device=self.device
         )
-        self.item_memory = torch.zeros(
+        self.item_memory: torch.Tensor = torch.zeros(
             (batch_size, self.nb_items, self.embedding_size), device=self.device
         )
-        self.initialization(self.user_memory)
-        self.initialization(self.item_memory)
         return self.user_memory, self.item_memory
 
     def forward(
@@ -95,8 +94,8 @@ class Jodie(torch.nn.Module):
             item_ids: (batch_size) tensor.
             user_features: not supported by this model but required by the framework.
             item_features: not supported by this model but required by the framework.
-        This function will return the embeeddings for the given users and items and update the
-        memory.
+        This function will return the prediction for the given users and items, update the
+        memory and return the intermediate state of the memory needed for computing the loss.
 
         When called with only users or only items, the expected input are
             users: (batch_size, nb_users_to_extract) tensor.
@@ -184,7 +183,7 @@ class Jodie(torch.nn.Module):
 
         :Returns projected_embedding: (batch_size, embedding_size) tensor.
         """
-        time_context = self.time_context_layer(time_delta)
+        time_context = self.time_context_layer(time_delta.to(dtype=torch.float32))
         return (1 + time_context) * dynamic_embedding
 
     def embedding_update(
@@ -220,7 +219,7 @@ class Jodie(torch.nn.Module):
                 user_dynamic_embeddings,
                 item_dynamic_embeddings,
                 interaction_features,
-                user_delta,
+                user_delta.unsqueeze(1),
             )
         ).to(torch.float32)
         item_input = torch.hstack(
@@ -228,7 +227,7 @@ class Jodie(torch.nn.Module):
                 item_dynamic_embeddings,
                 user_dynamic_embeddings,
                 interaction_features,
-                item_delta,
+                item_delta.unsqueeze(1),
             )
         ).to(torch.float32)
 
@@ -240,7 +239,7 @@ class Jodie(torch.nn.Module):
         return new_user_embeddings, new_item_embeddings
 
     def training_sequence(
-        self: torch.nn.Module,
+        self,
         context: Context,
         optimizer: torch.optim.Optimizer,
         loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
@@ -259,23 +258,21 @@ class Jodie(torch.nn.Module):
         batch_size, sequence_size, _ = user_sequences.shape
         self.initialize_batch_run(batch_size=batch_size)
         loss = 0
-        self.heat_up(
-            user_sequences, item_sequences, length=context.train_heat_up_length
-        )
         self.train()
-        for i in range(context.train_heat_up_length, sequence_size):
+        for i in tqdm(range(sequence_size), desc="Sequence", leave=False):
             users, items = user_sequences[:, i], item_sequences[:, i]
             user_ids, item_ids = users[:, 0].to(torch.int32), items[:, 0].to(
                 torch.int32
             )
             user_features, item_features = users[:, 1:], items[:, 1:]
-            user_embeddings, item_embeddings = self.forward(
+
+            model_predictions = self.forward(
                 user_ids=user_ids,
                 user_features=user_features,
                 item_ids=item_ids,
                 item_features=item_features,
             )
-            loss += loss_fn(user_embeddings, item_embeddings)
+            loss += self.loss_fn(model_predictions, item_ids)
         loss = loss / sequence_size
         loss.backward()
         optimizer.step()
@@ -283,8 +280,47 @@ class Jodie(torch.nn.Module):
 
         return loss.item()
 
+    def loss_fn(
+        self,
+        model_predictions: tuple[
+            torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+        ],
+        item_ids: torch.Tensor,
+    ) -> torch.Tensor:
+        """Dedicated loss function described in the paper.
+
+        :Argument model_predictions:
+            new_user_embeddings: (batch_size, embedding_size) tensor.
+            previous_user_embeddings: (batch_size, embedding_size) tensor.
+            new_item_embeddings: (batch_size, embedding_size) tensor.
+            predicted_item_embeddings: (batch_size, embedding_size) tensor.
+            previous_item_embeddings: (batch_size, embedding_size) tensor.
+        :Argument item_ids: (batch_size) tensor.
+
+        :Returns loss:
+        """
+        mse_loss = torch.nn.MSELoss()
+        (
+            new_user_embeddings,
+            previous_user_embeddings,
+            new_item_embeddings,
+            predicted_item_embeddings,
+            previous_item_embeddings,
+        ) = model_predictions
+        target_item_embedding = torch.hstack(
+            (self.item_long_term_embeddings(item_ids), previous_item_embeddings)
+        )
+        prediction_loss = mse_loss(predicted_item_embeddings, target_item_embedding)
+        user_regularization_loss = mse_loss(
+            new_user_embeddings, previous_user_embeddings
+        )
+        item_regularization_loss = mse_loss(
+            new_item_embeddings, previous_item_embeddings
+        )
+        return prediction_loss + user_regularization_loss + item_regularization_loss
+
     def evaluate_sequence(
-        self: torch.nn.Module,
+        self,
         context: Context,
         loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
         measures: dict[str, float],
@@ -302,11 +338,10 @@ class Jodie(torch.nn.Module):
         """
         batch_size = user_sequences.shape[0]
         self.initialize_batch_run(batch_size=batch_size)
-        self.heat_up(user_sequences, item_sequences, length=context.test_heat_up_length)
         test_loss = 0
         for i in tqdm(
-            range(context.test_heat_up_length, context.test_sequence_length),
-            desc="sequence",
+            range(context.test_sequence_length),
+            desc="Sequence",
             leave=False,
         ):
             users, items = user_sequences[:, i], item_sequences[:, i]
@@ -320,7 +355,7 @@ class Jodie(torch.nn.Module):
         return test_loss
 
     def evaluate_step(
-        self: torch.nn.Module,
+        self,
         context: Context,
         loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
         measures: dict[str, float],
@@ -340,22 +375,37 @@ class Jodie(torch.nn.Module):
         batch_size = users.shape[0]
         user_ids, item_ids = users[:, 0].to(torch.int32), items[:, 0].to(torch.int32)
         user_features, item_features = users[:, 1:], items[:, 1:]
-        user_embedding = self.forward(user_ids=user_ids.unsqueeze(1)).squeeze(dim=1)
-        item_embeddings = self.forward(
-            item_ids=torch.arange(context.nb_items, device=context.device).repeat(
-                batch_size, 1
-            )
-        )
-        expected_item_embeddings = item_embeddings[torch.arange(batch_size), item_ids]
-        test_loss = loss_fn(user_embedding, expected_item_embeddings)
-        compute_metrics(
-            context.metrics, measures, item_ids, user_embedding, item_embeddings
-        )
-        # Communicate the interaction to the model for memory updates.
-        self.forward(
+        item_dynamic_embeddings = self.item_memory.clone()
+        model_predictions = self.forward(
             user_ids=user_ids,
             user_features=user_features,
             item_ids=item_ids,
             item_features=item_features,
+        )
+        test_loss = self.loss_fn(model_predictions, item_ids)
+        (
+            new_user_embeddings,
+            previous_user_embeddings,
+            new_item_embeddings,
+            predicted_item_embeddings,
+            previous_item_embeddings,
+        ) = model_predictions
+
+        target_embeddings = torch.cat(
+            (
+                torch.eye(self.nb_items, device=self.device).expand(
+                    (batch_size, self.nb_items, self.nb_items)
+                ),
+                item_dynamic_embeddings,
+            ),
+            dim=-1,
+        )
+
+        compute_metrics(
+            context.metrics,
+            measures,
+            item_ids,
+            predicted_item_embeddings,
+            target_embeddings,
         )
         return test_loss

@@ -17,6 +17,7 @@ from context import Context
 import data_loader
 from metrics import pick_metric
 from models.deepred import DeePRed
+from models.jodie import Jodie
 from models.limnet import LiMNet
 from models.trainable_embeddings import TrainableEmbeddings
 
@@ -97,6 +98,8 @@ def pick_model(model_name: str) -> torch.nn.Module:
             return LiMNet
         case "DeePRed":
             return DeePRed
+        case "Jodie":
+            return Jodie
     raise ValueError("Provided model name does not match an implementation.")
 
 

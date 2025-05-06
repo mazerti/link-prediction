@@ -1,3 +1,4 @@
+name: "wikipedia-trainable_embeddings"
 dataset: /data/gen-limnet/wikipedia.csv
 user_id_column: user_id
 item_id_column: item_id
@@ -22,6 +23,10 @@ loss:
 metrics:
   - l2_mrr
   - dot_product_mrr
+  - dot_product_recall_at_1
+  - dot_product_recall_at_10
+  - l2_recall_at_1
+  - l2_recall_at_10
 
 l2: 0
 

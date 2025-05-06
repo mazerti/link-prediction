@@ -44,6 +44,7 @@ class Context:
         self.test_heat_up_length: int = 0
         self.evaluate_every: int = 1
         self.checkpoint_every: int = 1
+        self.nb_checkpoint_to_keep: int = 3
 
         # Attributes without default value
         self.name: str
@@ -86,6 +87,7 @@ class Context:
         """Create a context from a checkpoint file."""
         checkpoint = torch.load(checkpoint_file, weights_only=False)
         context = Context(checkpoint["context"], args, checkpoint=True)
+        context.epoch = checkpoint["context"].get("epoch", 0)
         return context
 
     def __str__(self) -> str:

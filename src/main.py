@@ -224,7 +224,15 @@ def save_progress(context: Context, epoch: int):
     """Save the progress of the training to a file."""
     parent_folder = os.path.join("checkpoints", context.get_id())
     os.makedirs(parent_folder, exist_ok=True)
-    checkpoint_file = os.path.join(parent_folder, f"checkpoint-{epoch}.pth")
+    write_checkpoint(context, epoch, parent_folder)
+    delete_old_checkpoint(context, epoch, parent_folder)
+
+
+def write_checkpoint(context: Context, epoch: int, parent_folder: str):
+    """Write the content of the context in a new checkpoint file."""
+    checkpoint_file = os.path.join(
+        parent_folder, f"checkpoint-{str(epoch).zfill(len(str(context.epochs)))}.pth"
+    )  # clever code adding leading zeros to the epoch number, appropriate to the run max.
     torch.save(
         {
             "epoch": epoch,
@@ -234,6 +242,18 @@ def save_progress(context: Context, epoch: int):
         },
         checkpoint_file,
     )
+
+
+def delete_old_checkpoint(context: Context, epoch: int, parent_folder: str):
+    """Delete old checkpoint to limit the disk use."""
+    file_to_delete = os.path.join(
+        parent_folder,
+        f"checkpoint-{str(epoch-context.nb_checkpoint_to_keep).zfill(len(str(context.epochs)))}.pth",
+    )
+    try:
+        os.remove(file_to_delete)
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":

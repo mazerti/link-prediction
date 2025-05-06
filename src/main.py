@@ -55,15 +55,15 @@ def parse_args() -> argparse.Namespace:
 
 def run_training(args: argparse.Namespace, config_name: str) -> wandb.sdk.wandb_run.Run:
     """Run the whole training for the requested config and arguments."""
-    context = initialize_run(args, config_name=config_name)
+    context = initialize_run(
+        args, config_name=config_name, wand_project="link-prediction"
+    )
     train_model(context)
 
 
 def initialize_run(
-    args: argparse.Namespace, config_name: str
-) -> tuple[
-    torch.nn.Module, torch.utils.data.DataLoader, Context, wandb.sdk.wandb_run.Run
-]:
+    args: argparse.Namespace, config_name: str, wand_project: str
+) -> Context:
     """Initialize the context for the training."""
     config_type = os.path.splitext(config_name)[-1]
     if config_type == ".yaml":
@@ -83,7 +83,7 @@ def initialize_run(
 
     context = build_model(context)
 
-    context.run = set_up_wandb(context)
+    context.run = set_up_wandb(context, wand_project)
     return context
 
 
@@ -118,10 +118,10 @@ def build_model(context: Context) -> Context:
     return context
 
 
-def set_up_wandb(context: Context) -> wandb.sdk.wandb_run.Run:
+def set_up_wandb(context: Context, project: str) -> wandb.sdk.wandb_run.Run:
     """Set up W&B for logging evaluation."""
     return wandb.init(
-        project="link-prediction",
+        project=project,
         config=context.to_save(),
         id=context.get_id(),
         resume="allow",
@@ -133,7 +133,12 @@ def train_model(
 ) -> None:
     """Process to the model training on given dataset."""
     train_data, test_data = context.data
-    for epoch in tqdm(range(1, context.epochs + 1), desc="epochs"):
+    if context.epoch > context.epochs:
+        evaluate(context.model, test_data, context)
+        return
+    for epoch in tqdm(
+        range(context.epoch, context.epochs + 1), initial=context.epoch, desc="epochs"
+    ):
         training_loss = train_epoch(context.model, train_data, context)
         results = {"epoch": epoch, "Training loss": training_loss}
         if epoch % context.evaluate_every == 0:
@@ -141,6 +146,7 @@ def train_model(
         if epoch % context.checkpoint_every == 0:
             save_progress(context, epoch)
         context.run.log(results)
+        context.epoch = epoch
     save_progress(context, context.epochs)
 
 
@@ -168,12 +174,12 @@ def assemble_loss_fn(
     """Generate a loss function as a weighted sum of the listed losses."""
 
     def loss_fn(
-        user_embeddings: torch.Tensor, item_embeddings: torch.Tensor
+        context: Context, user_embeddings: torch.Tensor, item_embeddings: torch.Tensor
     ) -> torch.Tensor:
         """Apply all losses and sum their results with matching weights."""
         return sum(
             (
-                pick_metric(loss)(user_embeddings, item_embeddings) * weight
+                pick_metric(loss)(context, user_embeddings, item_embeddings) * weight
                 for loss, weight in losses.items()
             )
         )

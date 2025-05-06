@@ -2,8 +2,11 @@
 
 import torch
 
+from context import Context
+
 
 def compute_metrics(
+    context: Context,
     metrics_list: list[str],
     measures: dict[str:float],
     item_id: torch.Tensor,
@@ -13,21 +16,52 @@ def compute_metrics(
     """
     Evaluates the metrics on the given embeddings and adds them to the past measures.
 
-    Arguments:
-    metrics: the name of the metrics function as defined in the metric module.
-    measures: the sums of the evaluations of the metrics over past data.
-    item_id: (batch_size) tensor. Contains the id of the expected items.
-    user_embeddings: (batch_size, embedding size) tensor.
-    item_embeddings: (batch_size, nb_items, embedding size) tensor.
+    :param metrics: the name of the metrics function as defined in the metric module.
+    :param measures: the sums of the evaluations of the metrics over past data.
+    :param item_id: (batch_size) tensor. Contains the id of the expected items.
+    :param user_embeddings: (batch_size, embedding size) tensor.
+    :param item_embeddings: (batch_size, nb_items, embedding size) tensor.
         Contains the embeddings for every single item.
     """
     for metric in metrics_list:
         measures[metric] = measures.get(metric, 0) + pick_metric(metric)(
-            user_embedding, item_embeddings, item_id
+            context, user_embedding, item_embeddings, item_id
         )
 
 
+def _l2_scores(
+    context: Context,
+    user_embedding: torch.Tensor,
+    item_embeddings: torch.Tensor,
+) -> torch.Tensor:
+    """Computes the mean reciprocal rank metric.
+
+    :param: user_embeddings: (batch_size, embedding_size) tensor
+    :param item_embeddings: (batch_size, nb_items, embedding_size) tensor
+
+    :returns scores: (batch_size, nb_items) tensor.
+    """
+    l2_distance_fn = torch.nn.PairwiseDistance(2)
+    return l2_distance_fn(user_embedding.unsqueeze(1), item_embeddings)
+
+
+def _dot_product_scores(
+    context: Context,
+    user_embedding: torch.Tensor,
+    item_embeddings: torch.Tensor,
+) -> torch.Tensor:
+    """Computes the mean reciprocal rank metric.
+
+    :param user_embeddings: (batch_size, embedding_size) tensor
+    :param item_embeddings: (batch_size, nb_items, embedding_size) tensor
+
+    :returns scores: (batch_size, nb_items) tensor.
+    """
+    return torch.einsum("bd,bid->bi", user_embedding, item_embeddings)
+
+
 def l2_mrr(
+    context: Context,
     user_embedding: torch.Tensor,
     item_embeddings: torch.Tensor,
     expected_item_ids: torch.Tensor,
@@ -41,12 +75,12 @@ def l2_mrr(
     """
     assert len(user_embedding.shape) == 2, f"{user_embedding.shape=}"
     assert len(item_embeddings.shape) == 3, f"{item_embeddings.shape=}"
-    l2_distance_fn = torch.nn.PairwiseDistance(2)
-    scores = l2_distance_fn(user_embedding.unsqueeze(1), item_embeddings)
-    return _mean_reciprocal_rank(expected_item_ids, scores)
+    scores = _l2_scores(context, user_embedding, item_embeddings)
+    return _mean_reciprocal_rank(context, expected_item_ids, scores)
 
 
 def dot_product_mrr(
+    context: Context,
     user_embedding: torch.Tensor,
     item_embeddings: torch.Tensor,
     expected_item_ids: torch.Tensor,
@@ -60,12 +94,12 @@ def dot_product_mrr(
     """
     assert len(user_embedding.shape) == 2, f"{user_embedding.shape=}"
     assert len(item_embeddings.shape) == 3, f"{item_embeddings.shape=}"
-    scores = torch.einsum("bd,bid->bi", user_embedding, item_embeddings)
-    return _mean_reciprocal_rank(expected_item_ids, scores)
+    scores = _dot_product_scores(context, user_embedding, item_embeddings)
+    return _mean_reciprocal_rank(context, expected_item_ids, scores)
 
 
 def _mean_reciprocal_rank(
-    expected_item_ids: torch.Tensor, scores: torch.Tensor
+    context: Context, expected_item_ids: torch.Tensor, scores: torch.Tensor
 ) -> float:
     """Computes the mean reciprocal rank metric.
 
@@ -76,7 +110,7 @@ def _mean_reciprocal_rank(
     expected_item_ids: (batch_size) tensor.
     scores: (batch_size, nb_items) tensor.
     """
-    true_item_rank = _compute_rank(expected_item_ids, scores)
+    true_item_rank = _compute_rank(context, expected_item_ids, scores)
     with open(f"ranks{expected_item_ids.device}.txt", "+a") as f:
         torch.set_printoptions(profile="full")
         print(true_item_rank, file=f)
@@ -85,6 +119,7 @@ def _mean_reciprocal_rank(
 
 
 def l2_recall_at_1(
+    context: Context,
     user_embedding: torch.Tensor,
     item_embeddings: torch.Tensor,
     expected_item_ids: torch.Tensor,
@@ -96,10 +131,13 @@ def l2_recall_at_1(
     item_embeddings: (batch_size, nb_items, embedding_size) tensor
     expected_item_ids: (batch_size) tensor
     """
-    return _l2_recall_at_k(1, user_embedding, item_embeddings, expected_item_ids)
+    return _l2_recall_at_k(
+        context, 1, user_embedding, item_embeddings, expected_item_ids
+    )
 
 
 def l2_recall_at_10(
+    context: Context,
     user_embedding: torch.Tensor,
     item_embeddings: torch.Tensor,
     expected_item_ids: torch.Tensor,
@@ -111,10 +149,13 @@ def l2_recall_at_10(
     item_embeddings: (batch_size, nb_items, embedding_size) tensor
     expected_item_ids: (batch_size) tensor
     """
-    return _l2_recall_at_k(10, user_embedding, item_embeddings, expected_item_ids)
+    return _l2_recall_at_k(
+        context, 10, user_embedding, item_embeddings, expected_item_ids
+    )
 
 
 def _l2_recall_at_k(
+    context: Context,
     k: int,
     user_embedding: torch.Tensor,
     item_embeddings: torch.Tensor,
@@ -129,10 +170,11 @@ def _l2_recall_at_k(
     """
     l2_distance_fn = torch.nn.PairwiseDistance(2)
     scores = l2_distance_fn(user_embedding.unsqueeze(1), item_embeddings)
-    return _recall_at_k(k, expected_item_ids, scores)
+    return _recall_at_k(context, k, expected_item_ids, scores)
 
 
 def dot_product_recall_at_1(
+    context: Context,
     user_embedding: torch.Tensor,
     item_embeddings: torch.Tensor,
     expected_item_ids: torch.Tensor,
@@ -145,11 +187,12 @@ def dot_product_recall_at_1(
     expected_item_ids: (batch_size) tensor
     """
     return _dot_product_recall_at_k(
-        1, user_embedding, item_embeddings, expected_item_ids
+        context, 1, user_embedding, item_embeddings, expected_item_ids
     )
 
 
 def dot_product_recall_at_10(
+    context: Context,
     user_embedding: torch.Tensor,
     item_embeddings: torch.Tensor,
     expected_item_ids: torch.Tensor,
@@ -162,11 +205,12 @@ def dot_product_recall_at_10(
     expected_item_ids: (batch_size) tensor
     """
     return _dot_product_recall_at_k(
-        10, user_embedding, item_embeddings, expected_item_ids
+        context, 10, user_embedding, item_embeddings, expected_item_ids
     )
 
 
 def _dot_product_recall_at_k(
+    context: Context,
     k: int,
     user_embedding: torch.Tensor,
     item_embeddings: torch.Tensor,
@@ -180,11 +224,11 @@ def _dot_product_recall_at_k(
     expected_item_ids: (batch_size) tensor
     """
     scores = torch.einsum("bd,bid->bi", user_embedding, item_embeddings)
-    return _recall_at_k(k, expected_item_ids, scores)
+    return _recall_at_k(context, k, expected_item_ids, scores)
 
 
 def _recall_at_k(
-    k: int, expected_item_ids: torch.Tensor, scores: torch.Tensor
+    context: Context, k: int, expected_item_ids: torch.Tensor, scores: torch.Tensor
 ) -> float:
     """Computes the recall at k.
 
@@ -195,21 +239,22 @@ def _recall_at_k(
     expected_item_ids: (batch_size) tensor.
     scores: (batch_size, nb_items) tensor.
     """
-    true_item_rank = _compute_rank(expected_item_ids, scores)
+    true_item_rank = _compute_rank(context, expected_item_ids, scores)
     return (true_item_rank <= k).sum().item() / true_item_rank.shape[0]
 
 
 def _compute_rank(
-    expected_item_ids: torch.Tensor, scores: torch.Tensor
+    context: Context, expected_item_ids: torch.Tensor, scores: torch.Tensor
 ) -> torch.Tensor:
     """
     Computes the rank of the true items according to given scoring function.
 
     Can not be directly used as a metric.
 
-    Arguments:
-    expected_item_ids: (batch_size) tensor.
-    scores: (batch_size, nb_items) tensor.
+    :param expected_item_ids: (batch_size) tensor.
+    :param scores: (batch_size, nb_items) tensor.
+
+    :returns: (batch_size) tensor.
     """
     _, ranked_items = scores.sort(dim=-1, descending=True)
     true_item_rank = (ranked_items == expected_item_ids.unsqueeze(1)).nonzero(
@@ -219,7 +264,9 @@ def _compute_rank(
     return true_item_rank
 
 
-def dot_product_mse(user_embeddings: torch.Tensor, item_embeddings: torch.Tensor):
+def dot_product_mse(
+    context: Context, user_embeddings: torch.Tensor, item_embeddings: torch.Tensor
+):
     """Loss function taking normalized embeddings and trying to maximise their dot product.
 
     Arguments:
@@ -232,7 +279,9 @@ def dot_product_mse(user_embeddings: torch.Tensor, item_embeddings: torch.Tensor
     return loss
 
 
-def expressivity_loss(user_embeddings: torch.Tensor, item_embeddings: torch.Tensor):
+def expressivity_loss(
+    context: Context, user_embeddings: torch.Tensor, item_embeddings: torch.Tensor
+):
     """Loss rewarding a bigger distance inbetween two items or two users embeddings.
 
     Arguments:
@@ -252,7 +301,7 @@ def expressivity_loss(user_embeddings: torch.Tensor, item_embeddings: torch.Tens
 
 
 def frobenius_regularization(
-    user_embeddings: torch.Tensor, item_embeddings: torch.Tensor
+    context: Context, user_embeddings: torch.Tensor, item_embeddings: torch.Tensor
 ):
     """Loss rewarding a bigger distance inbetween two embeddings.
 
@@ -267,7 +316,9 @@ def frobenius_regularization(
     return regularization_matrix.norm(dim=(-1, -2)).mean()
 
 
-def mean_squared_error(user_embeddings: torch.Tensor, item_embeddings: torch.Tensor):
+def mean_squared_error(
+    context: Context, user_embeddings: torch.Tensor, item_embeddings: torch.Tensor
+):
     """Loss function taking embeddings and trying to minimise their l2 distance.
 
     Arguments:
@@ -276,6 +327,50 @@ def mean_squared_error(user_embeddings: torch.Tensor, item_embeddings: torch.Ten
     """
     loss_fn = torch.nn.MSELoss()
     return loss_fn(user_embeddings, item_embeddings)
+
+
+def plot_predictions(
+    context: Context,
+    user_embedding: torch.Tensor,
+    item_embeddings: torch.Tensor,
+    expected_item_id: torch.Tensor,
+):
+    """Plot as many information as possible on the prediction.
+
+    This function will directly log the distances and the ranks to the W&B run.
+    It is only meant to be used with an appropriate run.
+
+    Arguments:
+    user_embeddings: (batch_size, embedding_size) tensor
+    item_embeddings: (batch_size, nb_items, embedding_size) tensor
+    expected_item_ids: (batch_size) tensor
+    """
+    run = context.run
+    nb_batches, nb_items, _ = item_embeddings.shape
+
+    l2_scores = _l2_scores(context, user_embedding, item_embeddings)
+    dot_product_scores = _dot_product_scores(context, user_embedding, item_embeddings)
+
+    l2_ranks = _compute_rank(context, expected_item_id, l2_scores)
+    dot_product_ranks = _compute_rank(context, expected_item_id, dot_product_scores)
+
+    for batch_index in range(nb_batches):
+        for item_id in range(nb_items):
+            run.log(
+                {
+                    "l2-distance": l2_scores[batch_index, item_id].item(),
+                    "dot-product_distance": dot_product_scores[
+                        batch_index, item_id
+                    ].item(),
+                }
+            )
+        run.log(
+            {
+                "l2-ranks": l2_ranks[batch_index].item(),
+                "dot-product-ranks": dot_product_ranks[batch_index].item(),
+            }
+        )
+    return 0
 
 
 def pick_metric(metric_name: str) -> callable:

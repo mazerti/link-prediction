@@ -151,7 +151,7 @@ class TrainableEmbeddings(torch.nn.Module):
         expected_item_embeddings = item_embeddings[torch.arange(batch_size), item_ids]
         test_loss = loss_fn(user_embedding, expected_item_embeddings)
         compute_metrics(
-            context.metrics, measures, item_ids, user_embedding, item_embeddings
+            context, context.metrics, measures, item_ids, user_embedding, item_embeddings
         )
         # Communicate the interaction to the model for memory updates.
         self.forward(

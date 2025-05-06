@@ -402,6 +402,7 @@ class Jodie(torch.nn.Module):
         )
 
         compute_metrics(
+            context,
             context.metrics,
             measures,
             item_ids,

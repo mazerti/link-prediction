@@ -12,7 +12,9 @@ import torch
 from context import Context
 
 
-def prepare_dataset(df: pd.DataFrame, context: Context) -> torch.utils.data.DataLoader:
+def prepare_dataset(
+    df: pd.DataFrame, context: Context
+) -> tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
     """Prepare the raw data for the training.
 
     Include, reingexing of the ids, features computation, split into train/test sets, and loading

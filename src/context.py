@@ -29,10 +29,11 @@ class Context:
         self.nb_items: int = None
         self.user_features: list[str] = []
         self.item_features: list[str] = []
-        self.data: torch.utils.data.DataLoader
+        self.data: tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]
         self.model: torch.nn.Module
         self.optimizer: torch.optim.Optimizer
         self.run: wandb.sdk.wandb_run.Run
+        self.epoch: int = 0
 
         forbidden_settings = dir(self)
 

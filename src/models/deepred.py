@@ -257,7 +257,7 @@ class DeePRed(torch.nn.Module):
             item_ids=item_ids,
             item_features=item_features,
         )
-        loss = loss_fn(user_embeddings, item_embeddings) / sequence_size
+        loss = loss_fn(context, user_embeddings, item_embeddings) / sequence_size
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -328,9 +328,14 @@ class DeePRed(torch.nn.Module):
             )
         )
         expected_item_embeddings = item_embeddings[torch.arange(batch_size), item_ids]
-        test_loss = loss_fn(user_embedding, expected_item_embeddings)
+        test_loss = loss_fn(context, user_embedding, expected_item_embeddings)
         compute_metrics(
-            context.metrics, measures, item_ids, user_embedding, item_embeddings
+            context,
+            context.metrics,
+            measures,
+            item_ids,
+            user_embedding,
+            item_embeddings,
         )
         # Communicate the interaction to the model for memory updates.
         self.forward(

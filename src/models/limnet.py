@@ -254,7 +254,7 @@ class LiMNet(torch.nn.Module):
                 item_ids=item_ids,
                 item_features=item_features,
             )
-            loss += loss_fn(user_embeddings, item_embeddings)
+            loss += loss_fn(context, user_embeddings, item_embeddings)
         loss = loss / sequence_size
         loss.backward()
         optimizer.step()
@@ -326,9 +326,9 @@ class LiMNet(torch.nn.Module):
             )
         )
         expected_item_embeddings = item_embeddings[torch.arange(batch_size), item_ids]
-        test_loss = loss_fn(user_embedding, expected_item_embeddings)
+        test_loss = loss_fn(context, user_embedding, expected_item_embeddings)
         compute_metrics(
-            context.metrics, measures, item_ids, user_embedding, item_embeddings
+            context, context.metrics, measures, item_ids, user_embedding, item_embeddings
         )
         # Communicate the interaction to the model for memory updates.
         self.forward(

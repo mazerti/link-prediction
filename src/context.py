@@ -44,7 +44,7 @@ class Context:
         self.test_heat_up_length: int = 0
         self.evaluate_every: int = 1
         self.checkpoint_every: int = 1
-        self.nb_checkpoint_to_keep: int = 3
+        self.nb_checkpoints_to_keep: int = 2
 
         # Attributes without default value
         self.name: str
@@ -76,6 +76,8 @@ class Context:
                 continue
             setattr(self, key, value)
         self.device = "cpu" if args.gpu is None else f"cuda:{args.gpu}"
+        if args.epochs:
+            self.epochs = args.epochs
 
     def from_config(config_file: str, args: argparse.Namespace):
         """Create a context from a config file."""

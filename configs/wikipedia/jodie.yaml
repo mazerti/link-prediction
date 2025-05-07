@@ -1,3 +1,4 @@
+name: "wikipedia-jodie"
 dataset: /data/gen-limnet/wikipedia.csv
 user_id_column: user_id
 item_id_column: item_id

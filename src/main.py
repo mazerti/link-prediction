@@ -50,6 +50,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gpu", type=str, required=False, default=None, help="Specify a gpu to use."
     )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        required=False,
+        default=None,
+        help="If you want to change the number of epochs from the loaded configs.",
+    )
     return parser.parse_args()
 
 
@@ -248,7 +255,9 @@ def delete_old_checkpoint(context: Context, epoch: int, parent_folder: str):
     """Delete old checkpoint to limit the disk use."""
     file_to_delete = os.path.join(
         parent_folder,
-        f"checkpoint-{str(epoch-context.nb_checkpoint_to_keep).zfill(len(str(context.epochs)))}.pth",
+        "checkpoint-"
+        + str(epoch - context.nb_checkpoints_to_keep).zfill(len(str(context.epochs)))
+        + ".pth",
     )
     try:
         os.remove(file_to_delete)

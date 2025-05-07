@@ -4,7 +4,7 @@ user_id_column: user_id
 item_id_column: item_id
 timestamp_column: timestamp
 
-epochs: 400
+epochs: 300
 train_ratio: 0.8
 train_sequence_length: 1
 train_sequence_stride: 1

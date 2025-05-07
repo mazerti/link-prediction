@@ -34,6 +34,7 @@ class Context:
         self.optimizer: torch.optim.Optimizer
         self.run: wandb.sdk.wandb_run.Run
         self.epoch: int = 0
+        self.checkpoint: dict[str:object] = None
 
         forbidden_settings = dir(self)
 
@@ -90,6 +91,7 @@ class Context:
         checkpoint = torch.load(checkpoint_file, weights_only=False)
         context = Context(checkpoint["context"], args, checkpoint=True)
         context.epoch = checkpoint["context"].get("epoch", 0)
+        context.checkpoint = checkpoint
         return context
 
     def __str__(self) -> str:

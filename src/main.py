@@ -118,10 +118,15 @@ def pick_model(model_name: str) -> torch.nn.Module:
 def build_model(context: Context) -> Context:
     """Build the model and optimizer."""
     context.model.build(context)
-    # learning_rate = 0.001 * context.train_batch_size / 64
+
     context.optimizer = torch.optim.Adam(
         context.model.parameters(), lr=context.learning_rate, weight_decay=context.l2
     )
+
+    if context.checkpoint:
+        context.model.load_state_dict(context.checkpoint["model_state_dict"])
+        context.optimizer.load_state_dict(context.checkpoint["optimizer_state_dict"])
+
     return context
 
 

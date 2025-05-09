@@ -19,11 +19,13 @@ class LiMNet(torch.nn.Module):
         initialization: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
         normalize=True,
         dropout_rate=0,
+        nb_layers: int = 1,
         *args,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.embedding_size: int = embedding_size
+        self.nb_layers = nb_layers
         self.initialization: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = (
             getattr(torch.nn.init, initialization)
         )
@@ -34,6 +36,7 @@ class LiMNet(torch.nn.Module):
         self.item_memory: torch.Tensor = None
         self.user_cell: torch.nn.GRUCell = None
         self.item_cell: torch.nn.GRUCell = None
+        self.layer: torch.nn.Sequential = None
 
         # Arguments defined later
         self.nb_users: int
@@ -45,19 +48,27 @@ class LiMNet(torch.nn.Module):
         self.nb_users = settings.nb_users
         self.nb_items = settings.nb_items
         self.device = settings.device
-        self.dropout = torch.nn.Dropout(self.dropout_rate)
-        input_size = (
-            self.embedding_size
-            + len(settings.user_features)
-            + self.embedding_size
-            + len(settings.item_features)
+
+        self.cross_rnn = torch.nn.Sequential(
+            LimnetLayer(
+                embedding_size=self.embedding_size,
+                user_feature_size=len(settings.user_features),
+                item_feature_size=len(settings.item_features),
+                device=settings.device,
+                dropout_rate=self.dropout_rate,
+            )
         )
-        self.user_cell = torch.nn.GRUCell(
-            input_size, self.embedding_size, device=settings.device
-        )
-        self.item_cell = torch.nn.GRUCell(
-            input_size, self.embedding_size, device=settings.device
-        )
+        for _ in range(self.nb_layers - 1):
+            self.cross_rnn.append(torch.nn.LeakyReLU())
+            self.cross_rnn.append(
+                LimnetLayer(
+                    embedding_size=self.embedding_size,
+                    cell=torch.nn.Linear,
+                    device=settings.device,
+                    dropout_rate=self.dropout_rate,
+                )
+            )
+            self.cross_rnn.append(torch.nn.Dropout(self.dropout_rate))
 
     def initialize_batch_run(
         self, batch_size: int
@@ -142,15 +153,18 @@ class LiMNet(torch.nn.Module):
         ], f"{item_ids.shape=}, {self.item_memory.shape=}"
         user_embeddings = self.user_memory[torch.arange(batch_size), user_ids, :]
         item_embeddings = self.item_memory[torch.arange(batch_size), item_ids, :]
-        user_input = torch.hstack(
-            (user_embeddings, user_features, item_embeddings, item_features)
-        ).to(torch.float32)
-        item_input = torch.hstack(
-            (item_embeddings, item_features, user_embeddings, user_features)
+        inputs = torch.hstack(
+            (
+                user_embeddings,
+                user_features,
+                item_embeddings,
+                item_features,
+            )
         ).to(torch.float32)
 
-        new_user_embeddings = self.dropout(self.user_cell(user_input))
-        new_item_embeddings = self.dropout(self.item_cell(item_input))
+        new_embeddings = self.cross_rnn(inputs)
+        new_user_embeddings = new_embeddings[:, : self.embedding_size]
+        new_item_embeddings = new_embeddings[:, self.embedding_size :]
         if self.normalize:
             new_user_embeddings = torch.nn.functional.normalize(
                 new_user_embeddings, dim=1
@@ -328,7 +342,12 @@ class LiMNet(torch.nn.Module):
         expected_item_embeddings = item_embeddings[torch.arange(batch_size), item_ids]
         test_loss = loss_fn(context, user_embedding, expected_item_embeddings)
         compute_metrics(
-            context, context.metrics, measures, item_ids, user_embedding, item_embeddings
+            context,
+            context.metrics,
+            measures,
+            item_ids,
+            user_embedding,
+            item_embeddings,
         )
         # Communicate the interaction to the model for memory updates.
         self.forward(
@@ -338,3 +357,59 @@ class LiMNet(torch.nn.Module):
             item_features=item_features,
         )
         return test_loss
+
+
+class LimnetLayer(torch.nn.Module):
+    """One layer of cross-GRU"""
+
+    def __init__(
+        self,
+        embedding_size: int,
+        cell: torch.nn.Module = torch.nn.GRUCell,
+        user_feature_size: int = 0,
+        item_feature_size: int = 0,
+        device: torch.DeviceObjType = "cpu",
+        dropout_rate: int = 0,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.embedding_size = embedding_size
+        self.user_feature_size = user_feature_size
+        self.item_feature_size = item_feature_size
+
+        self.dropout = torch.nn.Dropout(dropout_rate)
+
+        input_size = (
+            self.embedding_size
+            + self.user_feature_size
+            + self.embedding_size
+            + self.item_feature_size
+        )
+        self.user_cell = cell(input_size, self.embedding_size, device=device)
+        self.item_cell = cell(input_size, self.embedding_size, device=device)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        """
+
+        :param user_input: (batch_size, embedding_size + user_feature + embedding_size + item_features)
+        tensor. First half is user embedding and features, second half is for item embeddings and features.
+
+        :return: (batch_size, embedding_size + embedding_size) tensor, first half is user embedding,
+        second half is item.
+        """
+        user_input, item_input = self.extract_inputs(inputs)
+
+        return torch.hstack(
+            (
+                self.dropout(self.user_cell(user_input)),
+                self.dropout(self.item_cell(item_input)),
+            )
+        )
+
+    def extract_inputs(self, inputs):
+        user_features = inputs[:, : self.embedding_size + self.user_feature_size]
+        item_features = inputs[:, self.embedding_size + self.user_feature_size :]
+        user_input = torch.hstack((user_features, item_features)).to(torch.float32)
+        item_input = torch.hstack((item_features, user_features)).to(torch.float32)
+        return user_input, item_input

@@ -1,4 +1,4 @@
-name: "wikipedia-limnet"
+name: "wikipedia-multi-limnet"
 dataset: /data/gen-limnet/wikipedia.csv
 user_id_column: user_id
 item_id_column: item_id
@@ -19,12 +19,16 @@ model_name: LiMNet
 model_attributes:
   embedding_size: 16
   initialization: xavier_normal_
+  nb_layers: 1
+  normalize: False
+  dropout_rate: 0.3
 loss:
-  dot_product_mse: 1
+  dot_product_mse: 0.3
+  mean_squared_error: 1
   expressivity_loss: 1
 
 metrics:
-  # - l2_mrr
+  - l2_mrr
   - dot_product_mrr
   - dot_product_recall_at_1
   - dot_product_recall_at_10

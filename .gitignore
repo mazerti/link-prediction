@@ -1,3 +1,5 @@
 __pycache__/
 wandb/
 .pylintrc
+results/
+checkpoints/

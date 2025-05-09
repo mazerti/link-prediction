@@ -146,10 +146,14 @@ def train_model(
     """Process to the model training on given dataset."""
     train_data, test_data = context.data
     if context.epoch > context.epochs:
-        evaluate(context.model, test_data, context)
+        results = {"epoch": context.epoch} | evaluate(context.model, test_data, context)
+        context.run.log(results)
         return
     for epoch in tqdm(
-        range(context.epoch, context.epochs + 1), initial=context.epoch, desc="epochs"
+        range(context.epoch, context.epochs + 1),
+        initial=context.epoch,
+        total=context.epochs,
+        desc="epochs",
     ):
         training_loss = train_epoch(context.model, train_data, context)
         results = {"epoch": epoch, "Training loss": training_loss}
@@ -261,7 +265,9 @@ def delete_old_checkpoint(context: Context, epoch: int, parent_folder: str):
     file_to_delete = os.path.join(
         parent_folder,
         "checkpoint-"
-        + str(epoch - context.nb_checkpoints_to_keep).zfill(len(str(context.epochs)))
+        + str(epoch - context.nb_checkpoints_to_keep * context.checkpoint_every).zfill(
+            len(str(context.epochs))
+        )
         + ".pth",
     )
     try:

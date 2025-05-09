@@ -4,7 +4,7 @@ user_id_column: user_id
 item_id_column: item_id
 timestamp_column: timestamp
 
-epochs: 60
+epochs: 140
 train_ratio: 0.8
 train_sequence_length: 1024
 train_sequence_stride: 300
@@ -15,7 +15,7 @@ test_batch_size: 128
 
 model_name: Jodie
 model_attributes:
-  embedding_size: 128
+  embedding_size: 16
 loss:
   
 metrics:
@@ -27,4 +27,4 @@ metrics:
   - l2_recall_at_10
 
 l2: 0.00001
-learning_rate: 0.001
+learning_rate: 0.01

@@ -16,8 +16,9 @@ test_batch_size: 8192
 model_name: TrainableEmbeddings
 model_attributes:
   embedding_size: 16
+  normalize: False
 loss:
-  dot_product_mse: 1
+  mean_squared_error: 1
   expressivity_loss: 1
 
 metrics:

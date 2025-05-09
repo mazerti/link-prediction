@@ -22,7 +22,7 @@ model_attributes:
   pooling: mean
   dropout_rate: 0.7
 loss:
-  dot_product_mse: 1
+  mean_squared_error: 1
   frobenius_regularization: 0.5
 
 metrics:

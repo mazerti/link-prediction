@@ -391,11 +391,14 @@ class LimnetLayer(torch.nn.Module):
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         """
 
-        :param user_input: (batch_size, embedding_size + user_feature + embedding_size + item_features)
-        tensor. First half is user embedding and features, second half is for item embeddings and features.
+        :param user_input:
+            (batch_size, embedding_size + user_feature + embedding_size + item_features)
+            tensor. First half is user embedding and features, second half is for item embeddings
+            and features.
 
-        :return: (batch_size, embedding_size + embedding_size) tensor, first half is user embedding,
-        second half is item.
+        :return:
+            (batch_size, embedding_size + embedding_size) tensor, first half is user embedding,
+            second half is item.
         """
         user_input, item_input = self.extract_inputs(inputs)
 

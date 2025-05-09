@@ -71,10 +71,7 @@ class TrainableEmbeddings(torch.nn.Module):
                     torch.nn.functional.normalize(user_embeddings, dim=-1),
                     torch.nn.functional.normalize(item_embeddings, dim=-1),
                 )
-            return (
-                user_embeddings(user_ids),
-                item_embeddings(item_ids),
-            )
+            return (user_embeddings, item_embeddings)
         if user_ids is not None:
             return torch.nn.functional.normalize(self.user_embeddings(user_ids), dim=-1)
         if item_ids is not None:

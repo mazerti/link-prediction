@@ -77,7 +77,7 @@ class Context:
                 continue
             setattr(self, key, value)
         self.device = "cpu" if args.gpu is None else f"cuda:{args.gpu}"
-        if args.epochs:
+        if hasattr(args, "epochs") and args.epochs:
             self.epochs = args.epochs
 
     def from_config(config_file: str, args: argparse.Namespace):

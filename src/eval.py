@@ -1,6 +1,8 @@
 import argparse
+import os
 import traceback
 
+import pandas as pd
 from tqdm import tqdm
 
 from context import Context
@@ -13,7 +15,6 @@ def main():
     for config in args.checkpoint:
         try:
             run_evaluation(args, config)
-        # pylint: disable=locally-disabled, broad-exception-caught
         except Exception:
             print(traceback.format_exc())
 
@@ -41,11 +42,20 @@ def run_evaluation(args: argparse.Namespace, checkpoint: str):
         args, config_name=checkpoint, wand_project="link-prediction-insights"
     )
     context.metrics = ["plot_predictions"]
+    context.results = pd.DataFrame(
+        columns=[
+            "l2-score",
+            "dot-product-score",
+            "l2-rank",
+            "dot-product-rank",
+            "label",
+        ]
+    )
     _, eval_data = context.data
     model = context.model
     model.eval()
     measures = {}
-    for X in tqdm(eval_data, desc="validation", leave=False):
+    for X in tqdm(eval_data, desc="validation"):
         user_sequences, item_sequences = X
         model.evaluate_sequence(
             context,
@@ -54,6 +64,20 @@ def run_evaluation(args: argparse.Namespace, checkpoint: str):
             user_sequences=user_sequences,
             item_sequences=item_sequences,
         )
+
+    save_results(context)
+
+    context.run.finish()
+
+
+def save_results(context: Context):
+    """Save the results in a file for further anlysis."""
+    print(context.results)
+    results: pd.DataFrame = context.results
+    parent_folder = os.path.join("results", context.get_id())
+    os.makedirs(parent_folder, exist_ok=True)
+    file = os.path.join(parent_folder, f"{context.get_id()}-results.csv")
+    results.to_csv(file, index=False)
 
 
 if __name__ == "__main__":

@@ -116,10 +116,6 @@ def _mean_reciprocal_rank(
     :param descending: true if higher score are better.
     """
     true_item_rank = _compute_rank(context, expected_item_ids, scores, descending)
-    with open(f"ranks{expected_item_ids.device}.txt", "+a") as f:
-        torch.set_printoptions(profile="full")
-        print(true_item_rank, file=f)
-        torch.set_printoptions(profile="default")
     return (1.0 / true_item_rank).float().mean().item()
 
 

@@ -63,12 +63,11 @@ class LiMNet(torch.nn.Module):
             self.cross_rnn.append(
                 LimnetLayer(
                     embedding_size=self.embedding_size,
-                    cell=torch.nn.Linear,
+                    cell=torch.nn.GRUCell,
                     device=settings.device,
                     dropout_rate=self.dropout_rate,
                 )
             )
-            self.cross_rnn.append(torch.nn.Dropout(self.dropout_rate))
 
     def initialize_batch_run(
         self, batch_size: int

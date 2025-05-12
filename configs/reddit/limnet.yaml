@@ -1,5 +1,5 @@
 name: "reddit-limnet"
-dataset: /data/gen-limnet/wikipedia.csv
+dataset: /data/gen-limnet/reddit.csv
 user_id_column: user_id
 item_id_column: item_id
 timestamp_column: timestamp

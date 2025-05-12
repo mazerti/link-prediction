@@ -35,6 +35,7 @@ class Context:
         self.run: wandb.sdk.wandb_run.Run
         self.epoch: int = 0
         self.checkpoint: dict[str:object] = None
+        self._lr_scheduler: torch.optim.lr_scheduler.LRScheduler = None
 
         forbidden_settings = dir(self)
 
@@ -46,6 +47,8 @@ class Context:
         self.evaluate_every: int = 1
         self.checkpoint_every: int = 1
         self.nb_checkpoints_to_keep: int = 2
+
+        self.lr_scheduler: dict[str, tuple[int, int, int]] = None
 
         # Attributes without default value
         self.name: str

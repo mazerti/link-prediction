@@ -31,7 +31,6 @@ def main():
     for config in args.config:
         try:
             run_training(args, config)
-        # pylint: disable=locally-disabled, broad-exception-caught
         except Exception:
             print(traceback.format_exc())
 
@@ -127,7 +126,33 @@ def build_model(context: Context) -> Context:
         context.model.load_state_dict(context.checkpoint["model_state_dict"])
         context.optimizer.load_state_dict(context.checkpoint["optimizer_state_dict"])
 
+    if context.lr_scheduler:
+        create_lr_scheduler(context.optimizer, context)
+
     return context
+
+
+def create_lr_scheduler(optimizer: torch.optim.Optimizer, context: Context) -> None:
+    """Create a learning rate scheduler based on the description given in the context."""
+
+    def unfold_scheduler_entry(scheduler_entry: dict[str : dict[str:float]]):
+        name, payload = next(iter(scheduler_entry.items()))
+        milestone = payload.pop("milestone")
+
+        scheduler = getattr(torch.optim.lr_scheduler, name)(
+            optimizer=context.optimizer, **payload
+        )
+        return scheduler, milestone
+
+    lr_schedulers, milestones = zip(
+        *map(
+            unfold_scheduler_entry,
+            context.lr_scheduler,
+        )
+    )
+    context._lr_scheduler = torch.optim.lr_scheduler.SequentialLR(
+        context.optimizer, lr_schedulers, milestones=milestones[1:]
+    )
 
 
 def set_up_wandb(context: Context, project: str) -> wandb.sdk.wandb_run.Run:
@@ -156,12 +181,18 @@ def train_model(
         desc="epochs",
     ):
         training_loss = train_epoch(context.model, train_data, context)
-        results = {"epoch": epoch, "Training loss": training_loss}
+        results = {
+            "epoch": epoch,
+            "Training loss": training_loss,
+            "learning-rate": context.optimizer.param_groups[0]["lr"],
+        }
         if epoch % context.evaluate_every == 0:
             results = results | evaluate(context.model, test_data, context)
         if epoch % context.checkpoint_every == 0:
             save_progress(context, epoch)
         context.run.log(results)
+        if context._lr_scheduler:
+            context._lr_scheduler.step()
         context.epoch = epoch
     save_progress(context, context.epochs)
 

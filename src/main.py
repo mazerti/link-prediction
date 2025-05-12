@@ -278,8 +278,10 @@ def save_progress(context: Context, epoch: int):
 def write_checkpoint(context: Context, epoch: int, parent_folder: str):
     """Write the content of the context in a new checkpoint file."""
     checkpoint_file = os.path.join(
-        parent_folder, f"checkpoint-{str(epoch).zfill(len(str(context.epochs)))}.pth"
-    )  # clever code adding leading zeros to the epoch number, appropriate to the run max.
+        parent_folder,
+        f"checkpoint-{str(epoch).zfill(len(str(context.epochs)))}.pth",
+        # clever code adding leading zeros to the epoch number, appropriate to the run max.
+    )
     torch.save(
         {
             "epoch": epoch,

@@ -45,4 +45,4 @@ lr_scheduler:
       milestone: 0
   - ExponentialLR:
       gamma: 0.8
-      milestone: 20
+      milestone: 15

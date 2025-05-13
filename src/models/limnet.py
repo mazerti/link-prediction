@@ -389,7 +389,7 @@ class LimnetLayer(torch.nn.Module):
             + self.item_feature_size
         )
         self.user_cell: torch.nn.Module = torch.nn.Sequential(
-            activation(input_size=input_size),
+            activation(),
             cell(input_size, self.embedding_size, device=device),
             torch.nn.Dropout(dropout_rate),
         )

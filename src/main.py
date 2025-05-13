@@ -31,8 +31,10 @@ def main():
     for config in args.config:
         try:
             run_training(args, config)
+            wandb.finish(0)
         except Exception:
             print(traceback.format_exc())
+            wandb.finish(0)
 
 
 def parse_args() -> argparse.Namespace:

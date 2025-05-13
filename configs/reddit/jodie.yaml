@@ -15,7 +15,7 @@ test_batch_size: 128
 
 model_name: Jodie
 model_attributes:
-  embedding_size: 32
+  embedding_size: 128
 loss:
   
 metrics:

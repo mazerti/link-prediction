@@ -4,6 +4,7 @@
 import re
 
 # third party imports
+import numpy as np
 import pandas as pd
 
 # first party imports
@@ -85,6 +86,30 @@ def compute_features(data: pd.DataFrame, context: Context) -> pd.DataFrame:
                 column_name="delta_items",
             )
             context.item_features.append("delta_items")
+        elif feature == "time_of_day":
+            data = compute_time_features(
+                data,
+                period=24 * 60 * 60 * context.time_unit,
+                timestamp_column=context.timestamp_column,
+                column_name="time_of_day",
+            )
+            context.item_features += ["time_of_day-sin", "time_of_day-cos"]
+        elif feature == "time_of_week":
+            data = compute_time_features(
+                data,
+                period=7 * 24 * 60 * 60 * context.time_unit,
+                timestamp_column=context.timestamp_column,
+                column_name="time_of_week",
+            )
+            context.item_features += ["time_of_week-sin", "time_of_week-cos"]
+        elif feature == "time_of_year":
+            data = compute_time_features(
+                data,
+                period=365.25 * 24 * 60 * 60 * context.time_unit,
+                timestamp_column=context.timestamp_column,
+                column_name="time_of_year",
+            )
+            context.item_features += ["time_of_year-sin", "time_of_year-cos"]
         elif re.match(r"user_last_(\d+)", feature):
             k = int(re.findall(r"user_last_(\d+)", feature)[0])
             data, columns = add_last_k(
@@ -116,16 +141,28 @@ def compute_deltas(
 ) -> pd.DataFrame:
     """Compute for each interaction the time since the last time the user/item interacted.
 
-    Arguments:
-    id_column: name of the column containing the user/item ids, depending on which one to compute.
-    timestamp_column: name of the column containing interaction timestamps.
-    column_name: name of the column containing the computed deltas.
+    :param id_column: name of the column containing the user/item ids, depending on which one to compute.
+    :param timestamp_column: name of the column containing interaction timestamps.
+    :param column_name: name of the column containing the computed deltas.
     """
     data = data.sort_values(by=[id_column, timestamp_column])
     data[column_name] = (
         data[timestamp_column].diff().apply(lambda x: 0 if pd.isna(x) or x < 0 else x)
     )
     return data.sort_index()
+
+
+def compute_time_features(
+    data: pd.DataFrame, period: int, timestamp_column: str, column_name: str
+) -> pd.DataFrame:
+    """Compute the time features for requested period.
+
+    The time features consist of sin(t/period) and cos(t/period)
+    :param timestamp_column: name of the column containing interaction timestamps.
+    :param column_name: name of the column containing the computed deltas."""
+    data[f"{column_name}-sin"] = np.sin(2 * np.pi * data[timestamp_column] / period)
+    data[f"{column_name}-cos"] = np.cos(2 * np.pi * data[timestamp_column] / period)
+    return data
 
 
 def add_last_k(

@@ -50,6 +50,8 @@ class Context:
 
         self.lr_scheduler: dict[str, tuple[int, int, int]] = None
 
+        self.time_unit: float = 1
+
         # Attributes without default value
         self.name: str
         self.dataset: str

@@ -104,6 +104,23 @@ learning_rate: 0.1
 """
 
 
+def job_file(config):
+    return f"""#!/bin/bash
+#SBATCH --job-name=mazerti-{config}
+#SBATCH -D .
+#SBATCH --output=mazerti-{config}_%j.out
+#SBATCH --error=mazerti-{config}_%j.err
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=20
+#SBATCH --time=10:00:00
+#SBATCH --gres=gpu:1
+
+export SRUN_CPUS_PER_TASK=${{SLURM_CPUS_PER_TASK}}
+
+srun python src/main.py configs/experiment/config.yaml
+"""
+
+
 counter = 1
 
 
@@ -119,9 +136,8 @@ def create_config(
     sequence_length=DEFAULT_SEQUENCE_LENGTH,
 ):
     global counter
-    file = os.path.join(folder, f"{str(counter).zfill(2)}-{config_name}.yaml")
-    counter += 1
-    with open(file, "w", encoding="utf-8") as f:
+    file = os.path.join(folder, f"{str(counter).zfill(2)}-{config_name}")
+    with open(f"{file}.yaml", "w", encoding="utf-8") as f:
         f.write(config_common(config_name, dataset, embedding_size))
         f.write(
             config_model(
@@ -133,6 +149,11 @@ def create_config(
                 sequence_length,
             )
         )
+    with open(
+        os.path.join(folder, "jobs", f"{counter}.sh"), "w", encoding="utf-8"
+    ) as f:
+        f.write(job_file(file))
+    counter += 1
 
 
 def create_configs(
@@ -183,6 +204,7 @@ def create_configs(
 def main():
     parent_folder = os.path.join("configs", "experiment")
     os.makedirs(parent_folder, exist_ok=True)
+    os.makedirs(os.path.join(parent_folder, "jobs"), exist_ok=True)
     create_configs("limnet-best", parent_folder, "LiMNet")
     create_configs("jodie-best", parent_folder, "Jodie")
 

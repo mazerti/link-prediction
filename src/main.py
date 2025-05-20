@@ -65,7 +65,7 @@ def parse_args() -> argparse.Namespace:
 def run_training(args: argparse.Namespace, config_name: str) -> wandb.sdk.wandb_run.Run:
     """Run the whole training for the requested config and arguments."""
     context = initialize_run(
-        args, config_name=config_name, wand_project="link-prediction"
+        args, config_name=config_name, wand_project="link-prediction-final"
     )
     train_model(context)
 

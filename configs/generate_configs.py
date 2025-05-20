@@ -104,12 +104,12 @@ learning_rate: 0.1
 """
 
 
-def job_file(config):
+def job_file(config_name, config_file):
     return f"""#!/bin/bash
-#SBATCH --job-name=mazerti-{config}
+#SBATCH --job-name=mazerti-{config_name}
 #SBATCH -D .
-#SBATCH --output=mazerti-{config}_%j.out
-#SBATCH --error=mazerti-{config}_%j.err
+#SBATCH --output=mazerti-{config_name}_%j.out
+#SBATCH --error=mazerti-{config_name}_%j.err
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=20
 #SBATCH --time=10:00:00
@@ -117,7 +117,7 @@ def job_file(config):
 
 export SRUN_CPUS_PER_TASK=${{SLURM_CPUS_PER_TASK}}
 
-srun python src/main.py configs/experiment/config.yaml
+srun python src/main.py {config_file}
 """
 
 
@@ -136,8 +136,8 @@ def create_config(
     sequence_length=DEFAULT_SEQUENCE_LENGTH,
 ):
     global counter
-    file = os.path.join(folder, f"{str(counter).zfill(2)}-{config_name}")
-    with open(f"{file}.yaml", "w", encoding="utf-8") as f:
+    file = os.path.join(folder, f"{str(counter).zfill(2)}-{config_name}.yaml")
+    with open(file, "w", encoding="utf-8") as f:
         f.write(config_common(config_name, dataset, embedding_size))
         f.write(
             config_model(
@@ -152,7 +152,7 @@ def create_config(
     with open(
         os.path.join(folder, "jobs", f"{counter}.sh"), "w", encoding="utf-8"
     ) as f:
-        f.write(job_file(file))
+        f.write(job_file(config_name, file))
     counter += 1
 
 

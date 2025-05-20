@@ -81,7 +81,11 @@ class Context:
             if key in forbidden_settings:
                 continue
             setattr(self, key, value)
-        self.device = "cpu" if args.gpu is None else f"cuda:{args.gpu}"
+        self.device = (
+            f"cuda:{args.gpu}"
+            if args.gpu
+            else "cuda" if torch.cuda.is_available() else "cpu"
+        )
         if hasattr(args, "epochs") and args.epochs:
             self.epochs = args.epochs
 

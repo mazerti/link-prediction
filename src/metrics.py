@@ -2,6 +2,7 @@
 
 import pandas as pd
 import torch
+import setuptools
 import wandb
 
 from context import Context

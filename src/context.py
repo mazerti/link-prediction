@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime
 import hashlib
 import torch
+import setuptools
 import wandb
 import yaml
 

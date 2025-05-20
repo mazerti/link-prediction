@@ -10,6 +10,7 @@ import traceback
 import pandas as pd
 import torch
 from tqdm import tqdm
+import setuptools
 import wandb
 import yaml
 

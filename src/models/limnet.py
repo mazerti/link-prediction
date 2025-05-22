@@ -64,7 +64,7 @@ class LiMNet(torch.nn.Module):
                     user_feature_size=self.embedding_size,
                     item_feature_size=self.embedding_size,
                     cell=torch.nn.GRUCell,
-                    activation= torch.nn.LeakyReLU,
+                    activation=torch.nn.LeakyReLU,
                     device=context.device,
                     dropout_rate=self.dropout_rate,
                     normalize=self.normalize,
@@ -168,7 +168,7 @@ class LiMNet(torch.nn.Module):
         ).to(torch.float32)
 
         new_embeddings = self.cross_rnn(inputs)
-        new_user_embeddings = new_embeddings[:, 2: 2 + self.embedding_size]
+        new_user_embeddings = new_embeddings[:, 2 : 2 + self.embedding_size]
         new_item_embeddings = new_embeddings[:, 2 + self.embedding_size :]
 
         self.user_memory[torch.arange(batch_size), user_ids, :] = new_user_embeddings
@@ -260,13 +260,19 @@ class LiMNet(torch.nn.Module):
                 torch.int32
             )
             user_features, item_features = users[:, 1:], items[:, 1:]
-            user_embeddings, item_embeddings = self.forward(
+            user_embeddings = self.forward(
+                user_ids=user_ids.unsqueeze(1), user_features=user_features
+            ).squeeze(1)
+            item_embeddings = self.forward(
+                item_ids=item_ids.unsqueeze(1), item_features=item_features
+            ).squeeze(1)
+            loss += loss_fn(context, user_embeddings, item_embeddings)
+            self.forward(
                 user_ids=user_ids,
                 user_features=user_features,
                 item_ids=item_ids,
                 item_features=item_features,
             )
-            loss += loss_fn(context, user_embeddings, item_embeddings)
         loss = loss / sequence_size
         loss.backward()
         optimizer.step()

@@ -251,14 +251,16 @@ class DeePRed(torch.nn.Module):
         users, items = user_sequences.flatten(0, 1), item_sequences.flatten(0, 1)
         user_ids, item_ids = users[:, 0].to(torch.int32), items[:, 0].to(torch.int32)
         user_features, item_features = users[:, 1:], items[:, 1:]
-        user_embeddings, item_embeddings = self.forward(
+        user_embeddings = self.forward(user_ids=user_ids, user_features=user_features)
+        item_embeddings = self.forward(item_ids=item_ids, item_features=item_features)
+        loss = loss_fn(context, user_embeddings, item_embeddings) / sequence_size
+        loss.backward()
+        self.forward(
             user_ids=user_ids,
             user_features=user_features,
             item_ids=item_ids,
             item_features=item_features,
         )
-        loss = loss_fn(context, user_embeddings, item_embeddings) / sequence_size
-        loss.backward()
         optimizer.step()
         optimizer.zero_grad()
 

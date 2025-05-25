@@ -13,12 +13,21 @@ from metrics import compute_metrics
 class Jodie(torch.nn.Module):
     """Own implementation of the Jodie model."""
 
-    def __init__(self, embedding_size: int, **kwargs):
+    def __init__(
+        self,
+        embedding_size: int,
+        use_static_embeddings: bool = True,
+        use_projection: bool = True,
+        **kwargs
+    ):
         super().__init__(**kwargs)
 
         self.embedding_size: int = embedding_size
 
         self.requested_features: set[str] = set(("delta_users", "delta_items"))
+
+        self.use_static_embeddings: bool = use_static_embeddings
+        self.use_projection: bool = use_projection
 
         # Must be initialized for each batch
         self.dynamic_user_embeddings: torch.Tensor
@@ -53,11 +62,13 @@ class Jodie(torch.nn.Module):
             1, self.embedding_size, device=settings.device
         )
         prediction_input_size: int = (
-            self.embedding_size + self.nb_users + self.embedding_size + self.nb_items
+            self.embedding_size
+            + self.embedding_size
+            + (self.nb_users + self.nb_items if self.use_static_embeddings else 0)
         )
         self.prediction_layer: torch.nn.Linear = torch.nn.Linear(
             prediction_input_size,
-            self.nb_items + self.embedding_size,
+            self.embedding_size + (self.nb_items if self.use_static_embeddings else 0),
             device=settings.device,
         )
 
@@ -109,10 +120,6 @@ class Jodie(torch.nn.Module):
             return self.forward_edge_sequence(
                 user_ids, user_features, item_ids, item_features
             )
-        if user_ids is not None:
-            return self.extract_user_embeddings(user_ids, user_features)
-        if item_ids is not None:
-            return self.extract_item_embeddings(item_ids, item_features)
         raise ValueError("Invalid input, provide user, item, or both.")
 
     def forward_edge_sequence(
@@ -148,15 +155,12 @@ class Jodie(torch.nn.Module):
         user_projections = self.embedding_projection(
             previous_user_embeddings, user_features
         )
+        prediction_input = [user_projections, previous_item_embeddings]
+        if self.use_static_embeddings:
+            prediction_input.append(self.user_long_term_embeddings(user_ids))
+            prediction_input.append(self.item_long_term_embeddings(item_ids))
         predicted_item_embeddings = self.prediction_layer(
-            torch.hstack(
-                (
-                    user_projections,
-                    self.user_long_term_embeddings(user_ids),
-                    previous_item_embeddings,
-                    self.item_long_term_embeddings(item_ids),
-                )
-            )
+            torch.hstack(prediction_input)
         )
 
         new_user_embeddings, new_item_embeddings = self.embedding_update(
@@ -183,6 +187,8 @@ class Jodie(torch.nn.Module):
 
         :Returns projected_embedding: (batch_size, embedding_size) tensor.
         """
+        if not self.use_projection:
+            return dynamic_embedding
         time_context = self.time_context_layer(time_delta.to(dtype=torch.float32))
         return (1 + time_context) * dynamic_embedding
 
@@ -307,9 +313,10 @@ class Jodie(torch.nn.Module):
             predicted_item_embeddings,
             previous_item_embeddings,
         ) = model_predictions
-        target_item_embedding = torch.hstack(
-            (self.item_long_term_embeddings(item_ids), previous_item_embeddings)
-        )
+        targets = [previous_item_embeddings]
+        if self.use_static_embeddings:
+            targets.append(self.item_long_term_embeddings(item_ids))
+        target_item_embedding = torch.hstack(targets)
         prediction_loss = mse_loss(predicted_item_embeddings, target_item_embedding)
         user_regularization_loss = mse_loss(
             new_user_embeddings, previous_user_embeddings
